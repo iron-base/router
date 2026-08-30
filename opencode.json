@@ -4,9 +4,21 @@
     "external_directory": "deny"
   },
   "references": {
-    "ironbase-cli": {
+    "hono": {
       "branch": "main",
-      "repository": "https://github.com/iron-base/cli.git"
+      "repository": "https://github.com/honojs/hono.git"
+    },
+    "elysia": {
+      "branch": "main",
+      "repository": "https://github.com/elysiajs/elysia.git"
+    },
+    "fastify": {
+      "branch": "main",
+      "repository": "https://github.com/fastify/fastify.git"
+    },
+    "express": {
+      "branch": "master",
+      "repository": "https://github.com/expressjs/express.git"
     }
   }
 }

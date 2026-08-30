@@ -1,6 +1,6 @@
 import { expect, it } from "bun:test";
 import { createRouter, defineSecurity } from "../src/index.ts";
-import { openapi30, type OpenAPI31, openapi31 } from "../src/openapi.ts";
+import { type OpenAPI31, openapi30, openapi31 } from "../src/openapi.ts";
 
 const numberSchema = {
   "~standard": {

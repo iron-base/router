@@ -290,6 +290,7 @@ interface InternalRoute {
   ) => MaybePromise<HandlerResult<any> | RawResponse>;
   readonly scopes: readonly Scope[];
   readonly errors: ReadonlyMap<number, InternalErrorDefinition>;
+  readonly errorScopes: readonly ReadonlyMap<number, InternalErrorDefinition>[];
   readonly security: ReadonlyMap<string, SecurityMetadata>;
 }
 interface InternalErrorDefinition {
@@ -394,7 +395,8 @@ export class Router<
       ...route,
       path: joinPaths(normalizedPrefix, route.path),
       scopes: [...this.#state.scopes, ...route.scopes],
-      errors: new Map([...this.#state.errors, ...route.errors]),
+      errors: mergeErrorScopes([...route.errorScopes, this.#state.errors]),
+      errorScopes: [...route.errorScopes, this.#state.errors],
       security: new Map([...this.#state.security, ...route.security]),
     }));
     return new Router({
@@ -591,10 +593,11 @@ export class Router<
     const route: InternalRoute = {
       method,
       path: normalizeRoutePath(path, this.#state.options),
-      options,
+      options: snapshotRouteOptions(options),
       handler: handler as InternalRoute["handler"],
       scopes: this.#state.scopes,
       errors: this.#state.errors,
+      errorScopes: [this.#state.errors],
       security: this.#state.security,
     };
     return new Router({
@@ -665,8 +668,17 @@ async function dispatch(
     }
     const match = matcher.match(headFromGet ? "GET" : method, pathname);
     if (!match) throw new RouterError(404, "Not found");
+    const scopes =
+      route.route.options.security?.length === 0
+        ? route.route.scopes.map((scope) => ({
+            ...scope,
+            middleware: scope.middleware.filter(
+              (middleware) => !isSecurityMiddleware(middleware),
+            ),
+          }))
+        : route.route.scopes;
     const response = await runScopes(
-      route.route.scopes,
+      scopes,
       request,
       runtime,
       (value) => {
@@ -881,11 +893,11 @@ async function serializeSuccess(
       `Status ${result.status} does not declare a response body`,
     );
   if (normalized.body && shouldValidateResponse(options))
-    await validate(normalized.body, result.data, "body");
+    await validateResponse(normalized.body, result.data, "body");
   const responseHeaders = new Headers();
   appendHeaders(responseHeaders, result.headers);
   if (normalized.headers && shouldValidateResponse(options))
-    await validate(
+    await validateResponse(
       normalized.headers,
       headerValues(responseHeaders),
       "headers",
@@ -903,6 +915,18 @@ async function serializeSuccess(
   });
 }
 
+async function validateResponse(
+  schema: Schema,
+  value: unknown,
+  location: ValidationError["location"],
+): Promise<void> {
+  try {
+    await validate(schema, value, location);
+  } catch {
+    throw new RouterError(500, "Route response failed validation");
+  }
+}
+
 async function formatError(
   error: unknown,
   route: InternalRoute | undefined,
@@ -911,82 +935,126 @@ async function formatError(
   rootErrors: ReadonlyMap<number, InternalErrorDefinition>,
 ): Promise<Response> {
   const errors = route?.errors ?? rootErrors;
-  let status =
+  const initialStatus =
     error instanceof HttpError ||
     error instanceof RouterError ||
     error instanceof ValidationError
       ? error.status
       : 500;
-  let definition: InternalErrorDefinition | undefined;
-  if (errors) {
-    definition = [...errors.values()].find(
-      (entry) =>
-        typeof entry.definition !== "function" &&
-        entry.definition.match?.(error),
-    );
-    if (definition) status = definition.status;
-    else definition = errors.get(status) ?? errors.get(500);
-  }
+  const selection = selectErrorDefinition(errors, error, initialStatus);
   try {
-    const headers = new Headers();
-    let data: unknown;
-    let contentType = "application/problem+json";
-    if (definition) {
-      const formatted =
-        typeof definition.definition === "function"
-          ? await definition.definition(error, context)
-          : await definition.definition.handler(error, context);
-      if (isErrorResult(formatted)) {
-        data = formatted.data;
-        appendHeaders(headers, formatted.headers);
-      } else {
-        data = formatted;
-      }
-      if (
-        typeof definition.definition !== "function" &&
-        definition.definition.headers &&
-        shouldValidateResponse(options)
-      ) {
-        await validate(
-          definition.definition.headers,
-          headerValues(headers),
-          "headers",
-        );
-      }
-      if (
-        typeof definition.definition !== "function" &&
-        definition.definition.schema &&
-        shouldValidateResponse(options)
-      ) {
-        await validate(definition.definition.schema, data, "body");
-        contentType = "application/json";
-      }
-    } else {
-      const problemOptions = options.problemDetails;
-      const defaults = problemOptions?.defaults?.(error, status, context) ?? {};
-      const message =
-        error instanceof Error && status < 500 ? error.message : undefined;
-      data = {
-        ...defaults,
-        type:
-          problemOptions?.type?.(error, status, context) ??
-          (problemOptions?.typeBaseUrl
-            ? `${problemOptions.typeBaseUrl.replace(/\/$/, "")}/${status}`
-            : defaults.type),
-        title: defaults.title ?? defaultTitle(status),
-        ...(message ? { detail: message } : {}),
-        ...(problemOptions?.instance
-          ? { instance: problemOptions.instance(error, status, context) }
-          : {}),
-      };
-    }
-    if (data && typeof data === "object")
-      data = { ...(data as Record<string, unknown>), status };
-    headers.set("content-type", contentType);
-    return new Response(JSON.stringify(data), { status, headers });
+    return await formatErrorResponse(
+      error,
+      selection.status,
+      selection.definition,
+      context,
+      options,
+    );
   } catch {
+    const origin = route?.errorScopes.findIndex((scope) =>
+      [...scope.values()].includes(selection.definition!),
+    );
+    if (origin !== undefined && origin >= 0) {
+      for (const scope of route!.errorScopes.slice(origin + 1)) {
+        const fallback = selectErrorDefinition(scope, error, initialStatus);
+        if (!fallback.definition) continue;
+        try {
+          return await formatErrorResponse(
+            error,
+            fallback.status,
+            fallback.definition,
+            context,
+            options,
+          );
+        } catch {
+          // Try each outer registry at most once before using the safe fallback.
+        }
+      }
+    }
     return safeInternalError();
   }
+}
+
+function selectErrorDefinition(
+  errors: ReadonlyMap<number, InternalErrorDefinition>,
+  error: unknown,
+  status: number,
+): { status: number; definition: InternalErrorDefinition | undefined } {
+  const definition = [...errors.values()].find(
+    (entry) =>
+      typeof entry.definition !== "function" && entry.definition.match?.(error),
+  );
+  if (definition) return { status: definition.status, definition };
+  const statusDefinition = errors.get(status) ?? errors.get(500);
+  return {
+    status: statusDefinition?.status ?? status,
+    definition: statusDefinition,
+  };
+}
+
+async function formatErrorResponse(
+  error: unknown,
+  status: number,
+  definition: InternalErrorDefinition | undefined,
+  context: object,
+  options: RouterOptions,
+): Promise<Response> {
+  const headers = new Headers();
+  let data: unknown;
+  let contentType = "application/problem+json";
+  if (definition) {
+    const formatted =
+      typeof definition.definition === "function"
+        ? await definition.definition(error, context)
+        : await definition.definition.handler(error, context);
+    if (isErrorResult(formatted)) {
+      data = formatted.data;
+      appendHeaders(headers, formatted.headers);
+    } else {
+      data = formatted;
+    }
+    if (
+      typeof definition.definition !== "function" &&
+      definition.definition.headers &&
+      shouldValidateResponse(options)
+    ) {
+      await validate(
+        definition.definition.headers,
+        headerValues(headers),
+        "headers",
+      );
+    }
+    if (
+      typeof definition.definition !== "function" &&
+      definition.definition.schema &&
+      shouldValidateResponse(options)
+    ) {
+      await validate(definition.definition.schema, data, "body");
+      contentType = "application/json";
+    }
+  } else {
+    const problemOptions = options.problemDetails;
+    const defaults = problemOptions?.defaults?.(error, status, context) ?? {};
+    const message =
+      error instanceof Error && status < 500 ? error.message : undefined;
+    data = {
+      ...defaults,
+      type:
+        problemOptions?.type?.(error, status, context) ??
+        (problemOptions?.typeBaseUrl
+          ? `${problemOptions.typeBaseUrl.replace(/\/$/, "")}/${status}`
+          : defaults.type),
+      title: defaults.title ?? defaultTitle(status),
+      ...(message ? { detail: message } : {}),
+      ...(problemOptions?.instance
+        ? { instance: problemOptions.instance(error, status, context) }
+        : {}),
+    };
+  }
+  if (data && typeof data === "object")
+    data = { ...(data as Record<string, unknown>), status };
+  headers.set("content-type", contentType);
+  return new Response(JSON.stringify(data), { status, headers });
 }
 
 function safeInternalError(): Response {
@@ -1009,6 +1077,11 @@ function isRawResponse(value: unknown): value is RawResponse {
 }
 function isSchema(value: unknown): value is Schema {
   return Boolean(value && typeof value === "object" && "~standard" in value);
+}
+function isSecurityMiddleware(value: unknown): boolean {
+  return Boolean(
+    value && typeof value === "function" && "__ironbaseSecurity" in value,
+  );
 }
 function shouldValidateResponse(options: RouterOptions): boolean {
   return (
@@ -1061,6 +1134,58 @@ function appendHeaders(target: Headers, input: unknown): void {
     const values = Array.isArray(rawValue) ? rawValue : [rawValue];
     for (const value of values) target.append(key, String(value));
   }
+}
+function snapshotRouteOptions(
+  options: RouteOptions<any, any, any>,
+): RouteOptions<any, any, any> {
+  const responses = Object.freeze(
+    Object.fromEntries(
+      Object.entries(options.responses).map(([status, definition]) => [
+        status,
+        isSchema(definition)
+          ? definition
+          : Object.freeze({ ...(definition as ResponseDefinition) }),
+      ]),
+    ),
+  ) as ResponseDefinitions;
+  const security = options.security
+    ? (Object.freeze(
+        options.security.map((requirement) =>
+          Object.freeze(
+            Object.fromEntries(
+              Object.entries(requirement).map(([name, scopes]) => [
+                name,
+                Object.freeze([...scopes]),
+              ]),
+            ),
+          ),
+        ),
+      ) as readonly SecurityRequirement[])
+    : undefined;
+  return Object.freeze({
+    ...options,
+    request: options.request
+      ? Object.freeze({ ...options.request })
+      : undefined,
+    responses,
+    middleware: options.middleware
+      ? Object.freeze([...options.middleware])
+      : undefined,
+    tags: options.tags ? Object.freeze([...options.tags]) : undefined,
+    security,
+    extensions: options.extensions
+      ? Object.freeze({ ...options.extensions })
+      : undefined,
+  });
+}
+function mergeErrorScopes(
+  scopes: readonly ReadonlyMap<number, InternalErrorDefinition>[],
+): ReadonlyMap<number, InternalErrorDefinition> {
+  const merged = new Map<number, InternalErrorDefinition>();
+  for (let index = scopes.length - 1; index >= 0; index -= 1)
+    for (const [status, definition] of scopes[index]!)
+      merged.set(status, definition);
+  return merged;
 }
 function normalizeRoutePath(path: string, options: RouterOptions): string {
   if (!path.startsWith("/"))

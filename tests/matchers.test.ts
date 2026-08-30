@@ -33,6 +33,30 @@ describe("default route matcher", () => {
     expect(matcher.match("GET", "/users")).toBeUndefined();
   });
 
+  it("keeps static and parameter precedence stable across registration order", () => {
+    // Derived from Hono's static-versus-dynamic router conformance cases.
+    for (const paths of [
+      ["/reg-exp/router", "/reg-exp/{id}"],
+      ["/reg-exp/{id}", "/reg-exp/router"],
+    ]) {
+      const matcher = new DefaultRouteMatcher<string>();
+      for (const path of paths) matcher.add("GET", path, path);
+      matcher.add("POST", "/reg-exp/{id}", "post-parameter");
+
+      expect(matcher.match("GET", "/reg-exp/router")).toEqual({
+        route: "/reg-exp/router",
+        params: {},
+      });
+      expect(matcher.match("GET", "/reg-exp/value")).toEqual({
+        route: "/reg-exp/{id}",
+        params: { id: "value" },
+      });
+      expect(matcher.match("POST", "/reg-exp/router")?.route).toBe(
+        "post-parameter",
+      );
+    }
+  });
+
   it("parses legal route patterns and rejects relative paths", () => {
     expect(parsePath("/files/{name}/*rest")).toEqual([
       { kind: "static", value: "files" },

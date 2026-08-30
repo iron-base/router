@@ -225,7 +225,7 @@ describe("router integration", () => {
   it("inherits mount context and errors without changing sibling routes", async () => {
     const child = createRouter<{ requestId: string }>()
       .use<{ child: true }>((_request, context, next) =>
-        next({ ...context, child: true })
+        next({ ...context, child: true }),
       )
       .get(
         "/",
@@ -245,7 +245,7 @@ describe("router integration", () => {
       );
     const app = createRouter()
       .use<{ requestId: string }>((_request, context, next) =>
-        next({ ...context, requestId: "r1" })
+        next({ ...context, requestId: "r1" }),
       )
       .errors({
         404: (_error, context) => ({ title: `Missing ${context.requestId}` }),
@@ -367,14 +367,12 @@ describe("router integration", () => {
       .head("/head", { responses: { 204: {} } }, () => ({
         status: 204 as const,
       }));
-    for (
-      const [path, method] of [
-        ["/put", "PUT"],
-        ["/patch", "PATCH"],
-        ["/delete", "DELETE"],
-        ["/head", "HEAD"],
-      ] as const
-    ) {
+    for (const [path, method] of [
+      ["/put", "PUT"],
+      ["/patch", "PATCH"],
+      ["/delete", "DELETE"],
+      ["/head", "HEAD"],
+    ] as const) {
       expect(
         (await app.request(`https://test.invalid${path}`, { method })).status,
       ).toBe(204);
