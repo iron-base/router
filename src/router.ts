@@ -9,22 +9,34 @@ import type { OpenAPI30 } from "./openapi/3.0.ts";
 import type { OpenAPI31 } from "./openapi/3.1.ts";
 import type { StandardSchemaV1 } from "./standards/schema.ts";
 
+/** Metadata used to describe an OpenAPI document. */
 export interface OpenAPIInfo {
+  /** The API title. */
   readonly title: string;
+  /** The OpenAPI document version. */
   readonly version: string;
+  /** A description of the API. */
   readonly description?: string;
+  /** A URI for the API terms of service. */
   readonly termsOfService?: string;
+  /** Contact information for the exposed API. */
   readonly contact?: {
+    /** The contact person or organization name. */
     readonly name?: string;
+    /** A URI for the contact information. */
     readonly url?: string;
+    /** The contact email address. */
     readonly email?: string;
   };
+  /** License information for the exposed API. */
   readonly license?: { readonly name: string; readonly url?: string };
 }
+/** An OpenAPI 3.0 or 3.1 security scheme. */
 export type OpenAPISecurityScheme =
   | OpenAPI30.SecurityScheme
   | OpenAPI31.SecurityScheme;
 
+/** An HTTP method supported by the router. */
 export type HttpMethod =
   | "GET"
   | "POST"
@@ -34,10 +46,13 @@ export type HttpMethod =
   | "HEAD"
   | "OPTIONS"
   | "ALL";
+/** A Standard Schema used to validate a request or response. */
 export type Schema = StandardSchemaV1<any, any>;
+/** Extracts a schema's input type, or `undefined` when no schema is supplied. */
 export type InferInput<S> = S extends Schema
   ? StandardSchemaV1.InferInput<S>
   : undefined;
+/** Extracts a schema's output type, or `undefined` when no schema is supplied. */
 export type InferOutput<S> = S extends Schema
   ? StandardSchemaV1.InferOutput<S>
   : undefined;
@@ -46,23 +61,34 @@ type HeaderValues = Record<string, string | readonly string[]>;
 type MaybePromise<T> = T | Promise<T>;
 type ExtensionMap = Record<`x-${string}`, unknown>;
 
+/** Schemas used to validate the individual sections of an incoming request. */
 export interface RequestContract<
   Params extends Schema | undefined = Schema | undefined,
   Query extends Schema | undefined = Schema | undefined,
   Headers extends Schema | undefined = Schema | undefined,
   Body extends Schema | undefined = Schema | undefined,
 > {
+  /** The path parameter schema. */
   readonly params?: Params;
+  /** The query parameter schema. */
   readonly query?: Query;
+  /** The request header schema. */
   readonly headers?: Headers;
+  /** The JSON request body schema. */
   readonly body?: Body;
 }
 
+/** A request whose sections have been validated against a route contract. */
 export interface RouteRequest<Params, Query, Headers, Body> {
+  /** The unmodified native Fetch request. */
   readonly raw: Request;
+  /** The validated path parameters. */
   readonly params: Params;
+  /** The validated query parameters. */
   readonly query: Query;
+  /** The validated request headers. */
   readonly headers: Headers;
+  /** The validated JSON request body. */
   readonly body: Body;
 }
 
@@ -73,16 +99,22 @@ type RequestFor<C extends RequestContract | undefined> = RouteRequest<
   C extends RequestContract ? InferOutput<C["body"]> : undefined
 >;
 
+/** Describes a route response body, headers, and content type. */
 export interface ResponseDefinition<
   Body extends Schema | undefined = Schema | undefined,
   Headers extends Schema | undefined = Schema | undefined,
 > {
+  /** The response body schema. */
   readonly body?: Body;
+  /** The response header schema. */
   readonly headers?: Headers;
+  /** The response description used in generated OpenAPI documents. */
   readonly description?: string;
+  /** The response media type. Defaults to `application/json` when a body exists. */
   readonly contentType?: string;
 }
 
+/** Maps HTTP status codes to response schemas or definitions. */
 export type ResponseDefinitions = Record<
   number,
   Schema | ResponseDefinition<Schema | undefined, Schema | undefined>
@@ -108,6 +140,7 @@ type ResultForDefinition<
         } & ResultHeaders<Definition>
       : { readonly status: Status } & ResultHeaders<Definition>
     : never;
+/** The union of declared response values that a route handler may return. */
 export type HandlerResult<Responses extends ResponseDefinitions> = {
   [Status in keyof Responses & number]: ResultForDefinition<
     Status,
@@ -115,18 +148,43 @@ export type HandlerResult<Responses extends ResponseDefinitions> = {
   >;
 }[keyof Responses & number];
 
+/** A native Fetch response explicitly exempt from contract serialization. */
 export interface RawResponse {
+  /** The native response returned to the client. */
   readonly response: Response;
   readonly [rawResponse]: true;
 }
 const rawResponse = Symbol("ironbase.raw-response");
 
-/** Explicitly returns a native response without contract serialization. */
+/**
+ * Marks a native response to bypass route contract serialization.
+ *
+ * @param response - The native response to return unchanged.
+ * @example
+ * ```ts
+ * return raw(new Response("stream", { headers: { "content-type": "text/plain" } }));
+ * ```
+ * @returns A response marker accepted by route handlers.
+ */
 export function raw(response: Response): RawResponse {
   return { response, [rawResponse]: true };
 }
 
+/** A function that wraps downstream routing and may extend the request context. */
 export interface Middleware<ParentContext = object, AddedContext = object> {
+  /**
+   * Handles a request before the next middleware or route handler.
+   *
+   * @param request - The incoming native Fetch request.
+   * @param context - Context accumulated by earlier middleware.
+   * @param next - Continues dispatch with the extended context.
+   * @example
+   * ```ts
+   * const addRequestId: Middleware = (request, context, next) => next(context);
+   * ```
+   * @returns A response, either from this middleware or downstream dispatch.
+   * @throws {Error} If the middleware cannot continue processing the request.
+   */
   (
     request: Request,
     context: ParentContext,
@@ -134,18 +192,29 @@ export interface Middleware<ParentContext = object, AddedContext = object> {
   ): MaybePromise<Response>;
 }
 
+/** An RFC 9457-style problem details response body. */
 export interface ProblemDetails {
+  /** A URI identifying the problem type. */
   readonly type?: string;
+  /** A short, human-readable problem summary. */
   readonly title?: string;
+  /** The HTTP status code for this problem. */
   readonly status?: number;
+  /** A human-readable explanation specific to this occurrence. */
   readonly detail?: string;
+  /** A URI identifying this problem occurrence. */
   readonly instance?: string;
+  /** Additional problem-specific extension members. */
   readonly [extension: string]: unknown;
 }
 
+/** Configures default RFC 9457 problem details responses. */
 export interface ProblemDetailsOptions<Context> {
+  /** A base URI used to derive a problem type from its status. */
   readonly typeBaseUrl?: string;
+  /** Derives a problem type URI for an error. */
   readonly type?: (error: unknown, status: number, context: Context) => string;
+  /** Derives a problem occurrence URI for an error. */
   readonly instance?: (
     error: unknown,
     status: number,
@@ -158,10 +227,15 @@ export interface ProblemDetailsOptions<Context> {
   ) => Partial<ProblemDetails>;
 }
 
+/** A structured error formatter with optional matching and response contracts. */
 export interface ErrorDefinition<Context = object> {
+  /** Selects this definition for a matching thrown error. */
   readonly match?: (error: unknown) => boolean;
+  /** The schema for a custom JSON error response body. */
   readonly schema?: Schema;
+  /** The schema for custom error response headers. */
   readonly headers?: Schema;
+  /** Formats the thrown error as problem details or custom response data. */
   readonly handler: (
     error: unknown,
     context: Context,
@@ -169,12 +243,14 @@ export interface ErrorDefinition<Context = object> {
     ProblemDetails | { readonly data: unknown; readonly headers?: HeaderValues }
   >;
 }
+/** Maps HTTP error status codes to response formatters. */
 export type ErrorDefinitions<Context> = Record<
   number,
   | ((error: unknown, context: Context) => MaybePromise<ProblemDetails>)
   | ErrorDefinition<Context>
 >;
 
+/** Configures a route's contract, metadata, middleware, and responses. */
 export interface RouteOptions<
   RequestContractType extends RequestContract | undefined =
     | RequestContract
@@ -182,31 +258,64 @@ export interface RouteOptions<
   Responses extends ResponseDefinitions = ResponseDefinitions,
   Context = object,
 > {
+  /** A unique OpenAPI operation identifier. */
   readonly operationId?: string;
+  /** A short OpenAPI operation summary. */
   readonly summary?: string;
+  /** A detailed OpenAPI operation description. */
   readonly description?: string;
+  /** OpenAPI tags for the operation. */
   readonly tags?: readonly string[];
+  /** Whether the operation is deprecated. */
   readonly deprecated?: boolean;
+  /** Explicit OpenAPI security requirements; an empty array disables inherited policies. */
   readonly security?: readonly SecurityRequirement[];
+  /** Request validation schemas. */
   readonly request?: RequestContractType;
+  /** The response statuses and contracts that the handler may return. */
   readonly responses: Responses;
+  /** Error statuses to include in the generated OpenAPI operation. */
   readonly errors?: readonly number[];
+  /** Middleware that runs after scoped middleware and before the route handler. */
   readonly middleware?: readonly Middleware<Context, any>[];
+  /** OpenAPI specification extensions for the operation. */
   readonly extensions?: ExtensionMap;
 }
 
+/** An OpenAPI security requirement keyed by security-scheme name. */
 export interface SecurityRequirement {
+  /** The scopes required for a named security scheme. */
   readonly [scheme: string]: readonly string[];
 }
 
+/** A named security scheme and middleware in its available enforcement modes. */
 export interface SecurityPolicy<Context = object, AddedContext = object> {
+  /** Returns middleware that enforces the security scheme and emits required metadata. */
   required(): Middleware<Context, AddedContext>;
+  /** Returns middleware that enforces the scheme without adding OpenAPI requirements. */
   optional(): Middleware<Context, AddedContext>;
+  /** Returns middleware that emits OpenAPI metadata without running the scheme. */
   metadataOnly(): Middleware<Context, AddedContext>;
+  /** The unique name of the OpenAPI security scheme. */
   readonly name: string;
+  /** The OpenAPI security scheme definition. */
   readonly scheme: OpenAPISecurityScheme;
 }
 
+/**
+ * Defines an OpenAPI security scheme coupled to context-refining middleware.
+ *
+ * @param definition - The scheme name, OpenAPI definition, and enforcement middleware.
+ * @example
+ * ```ts
+ * const bearer = defineSecurity({
+ *   name: "bearerAuth",
+ *   scheme: { type: "http", scheme: "bearer" },
+ *   middleware: (_request, context, next) => next(context),
+ * });
+ * ```
+ * @returns A policy that exposes required, optional, and metadata-only middleware.
+ */
 export function defineSecurity<
   Context = object,
   AddedContext = object,
@@ -243,27 +352,64 @@ export function defineSecurity<
   };
 }
 
+/** Builds and optionally validates an OpenAPI document from compiled routes. */
 export interface OpenAPIAdapter<Document = unknown> {
+  /** The generated OpenAPI version. */
   readonly version: string;
+  /** The JSON Schema target requested from route schemas. */
   readonly schemaTarget: string;
+  /**
+   * Builds an OpenAPI document from compiled routes.
+   *
+   * @param registry - The compiled route registry.
+   * @example
+   * ```ts
+   * const document = await adapter.build(router.compile().registry);
+   * ```
+   * @returns The generated OpenAPI document.
+   * @throws {Error} If a route cannot be represented by the adapter.
+   */
   build(registry: CompiledRouteRegistry): MaybePromise<Document>;
+  /**
+   * Validates a document generated by this adapter.
+   *
+   * @param document - The generated document to validate.
+   * @example
+   * ```ts
+   * await adapter.validate?.(document);
+   * ```
+   * @returns Nothing when the document is valid.
+   * @throws {Error} If the document is invalid.
+   */
   validate?(document: Document): MaybePromise<void>;
 }
 
+/** Configures router dispatch, validation, and OpenAPI generation. */
 export interface RouterOptions<Context extends object = object> {
+  /** Creates the initial context for each request. */
   readonly context?: (
     request: Request,
     runtime: unknown,
   ) => MaybePromise<Context>;
+  /** Creates the route matcher used during compilation. */
   readonly matcher?: () => RouteMatcher<CompiledRoute>;
+  /** Controls whether trailing slashes participate in route matching. */
   readonly trailingSlash?: "strict" | "ignore";
+  /** Controls whether route path matching is case-sensitive. */
   readonly caseSensitive?: boolean;
+  /** Enables automatic `OPTIONS` responses for matched paths. */
   readonly autoOptions?: boolean;
+  /** The maximum JSON request body size in bytes. */
   readonly bodyLimit?: number;
+  /** Controls validation of successful response bodies and headers. */
   readonly responseValidation?: "off" | "development" | "always";
+  /** Configures default problem details responses. */
   readonly problemDetails?: ProblemDetailsOptions<Context>;
+  /** Configures OpenAPI document generation. */
   readonly openapi?: {
+    /** The default OpenAPI adapter. */
     readonly adapter?: OpenAPIAdapter;
+    /** Default OpenAPI document metadata. */
     readonly info?: OpenAPIInfo;
   };
 }
@@ -307,28 +453,63 @@ interface State {
   readonly security: ReadonlyMap<string, SecurityMetadata>;
 }
 
+/** An immutable, normalized route prepared for dispatch and document generation. */
 export interface CompiledRoute {
+  /** The route HTTP method. */
   readonly method: HttpMethod;
+  /** The normalized route path. */
   readonly path: string;
+  /** The route metadata and contracts. */
   readonly options: RouteOptions<any, any, any>;
+  /** The internal route definition used during dispatch. */
   readonly route: InternalRoute;
 }
+/** The immutable collection of compiled routes and discovered security schemes. */
 export interface CompiledRouteRegistry {
+  /** The normalized routes in registration order. */
   readonly routes: readonly CompiledRoute[];
+  /** Security schemes discovered from route middleware. */
   readonly securitySchemes: Readonly<Record<string, OpenAPISecurityScheme>>;
+  /** OpenAPI metadata configured for the router. */
   readonly info?: OpenAPIInfo;
 }
 
+/** A router prepared to dispatch requests without further route compilation. */
 export interface CompiledRouter<Runtime = unknown> {
+  /**
+   * Dispatches a native Fetch request.
+   *
+   * @param request - The incoming request.
+   * @param runtime - An optional runtime value for context creation.
+   * @example
+   * ```ts
+   * const response = await compiled.fetch(new Request("https://api.example.test/health"));
+   * ```
+   * @returns The route response.
+   */
   fetch(request: Request, runtime?: Runtime): Promise<Response>;
+  /**
+   * Creates, when needed, and dispatches a Fetch request.
+   *
+   * @param input - An absolute URL or native request.
+   * @param init - Request options when `input` is a URL.
+   * @param runtime - An optional runtime value for context creation.
+   * @example
+   * ```ts
+   * const response = await compiled.request("https://api.example.test/health");
+   * ```
+   * @returns The route response.
+   */
   request(
     input: string | Request,
     init?: RequestInit,
     runtime?: Runtime,
   ): Promise<Response>;
+  /** The immutable route registry used by this router. */
   readonly registry: CompiledRouteRegistry;
 }
 
+/** An immutable route builder and Fetch request dispatcher. */
 export class Router<
   Context extends object = object,
   Requirements extends object = object,
@@ -336,10 +517,22 @@ export class Router<
   #state: State;
   #compiled?: CompiledRouter;
 
+  /** @internal Creates a router from immutable builder state. */
   constructor(state: State) {
     this.#state = state;
   }
 
+  /**
+   * Adds scoped middleware or mounts another router at `/`.
+   *
+   * @param value - Middleware to add, or a child router to mount.
+   * @example
+   * ```ts
+   * const authenticated = app.use((request, context, next) => next(context));
+   * ```
+   * @returns A new router with the additional scope.
+   * @throws {Error} If the router has no active scope.
+   */
   use<AddedContext extends object>(
     middleware: Middleware<Context, AddedContext>,
   ): Router<Context & AddedContext, Requirements>;
@@ -368,6 +561,17 @@ export class Router<
     return new Router({ ...this.#state, scopes, security });
   }
 
+  /**
+   * Registers error response formatters for this router scope.
+   *
+   * @param definitions - Error formatters keyed by HTTP status code.
+   * @example
+   * ```ts
+   * const appWithErrors = app.errors({ 404: () => ({ title: "Not found" }) });
+   * ```
+   * @returns A new router with the error definitions.
+   * @throws {TypeError} If a key is not an HTTP error status from 400 through 599.
+   */
   errors(
     definitions: ErrorDefinitions<Context>,
   ): Router<Context, Requirements> {
@@ -384,6 +588,18 @@ export class Router<
     return new Router({ ...this.#state, errors });
   }
 
+  /**
+   * Mounts a child router under a path prefix.
+   *
+   * @param prefix - The absolute path prefix for the child routes.
+   * @param child - The router to mount.
+   * @example
+   * ```ts
+   * const appWithUsers = app.mount("/users", usersRouter);
+   * ```
+   * @returns A new router containing the mounted child routes.
+   * @throws {TypeError} If `prefix` does not start with `/`.
+   */
   mount<ChildContext extends object, ChildRequirements extends object>(
     prefix: string,
     child: Router<ChildContext, ChildRequirements> &
@@ -405,6 +621,19 @@ export class Router<
     });
   }
 
+  /**
+   * Registers a `GET` route.
+   *
+   * @param path - The absolute route path.
+   * @param options - The route contract and metadata.
+   * @param handler - The validated request handler.
+   * @example
+   * ```ts
+   * const withHealth = app.get("/health", { responses: { 200: schema } }, () => ({ status: 200, data: {} }));
+   * ```
+   * @returns A new router containing the route.
+   * @throws {TypeError} If `path` does not start with `/`.
+   */
   get<
     RequestType extends RequestContract | undefined,
     Responses extends ResponseDefinitions,
@@ -418,6 +647,19 @@ export class Router<
   ): Router<Context, Requirements> {
     return this.#route("GET", path, options, handler);
   }
+  /**
+   * Registers a `POST` route.
+   *
+   * @param path - The absolute route path.
+   * @param options - The route contract and metadata.
+   * @param handler - The validated request handler.
+   * @example
+   * ```ts
+   * const withUsers = app.post("/users", { responses: { 201: schema } }, createUser);
+   * ```
+   * @returns A new router containing the route.
+   * @throws {TypeError} If `path` does not start with `/`.
+   */
   post<Path extends string, Options extends RouteOptions<any, any, Context>>(
     path: Path,
     options: Options,
@@ -425,6 +667,19 @@ export class Router<
   ): Router<Context, Requirements> {
     return this.#route("POST", path, options, handler);
   }
+  /**
+   * Registers a `PUT` route.
+   *
+   * @param path - The absolute route path.
+   * @param options - The route contract and metadata.
+   * @param handler - The validated request handler.
+   * @example
+   * ```ts
+   * const updated = app.put("/users/{id}", { responses: { 200: schema } }, updateUser);
+   * ```
+   * @returns A new router containing the route.
+   * @throws {TypeError} If `path` does not start with `/`.
+   */
   put<Path extends string, Options extends RouteOptions<any, any, Context>>(
     path: Path,
     options: Options,
@@ -432,6 +687,19 @@ export class Router<
   ): Router<Context, Requirements> {
     return this.#route("PUT", path, options, handler);
   }
+  /**
+   * Registers a `PATCH` route.
+   *
+   * @param path - The absolute route path.
+   * @param options - The route contract and metadata.
+   * @param handler - The validated request handler.
+   * @example
+   * ```ts
+   * const patched = app.patch("/users/{id}", { responses: { 200: schema } }, patchUser);
+   * ```
+   * @returns A new router containing the route.
+   * @throws {TypeError} If `path` does not start with `/`.
+   */
   patch<Path extends string, Options extends RouteOptions<any, any, Context>>(
     path: Path,
     options: Options,
@@ -439,6 +707,19 @@ export class Router<
   ): Router<Context, Requirements> {
     return this.#route("PATCH", path, options, handler);
   }
+  /**
+   * Registers a `DELETE` route.
+   *
+   * @param path - The absolute route path.
+   * @param options - The route contract and metadata.
+   * @param handler - The validated request handler.
+   * @example
+   * ```ts
+   * const removed = app.delete("/users/{id}", { responses: { 204: {} } }, deleteUser);
+   * ```
+   * @returns A new router containing the route.
+   * @throws {TypeError} If `path` does not start with `/`.
+   */
   delete<Path extends string, Options extends RouteOptions<any, any, Context>>(
     path: Path,
     options: Options,
@@ -446,6 +727,19 @@ export class Router<
   ): Router<Context, Requirements> {
     return this.#route("DELETE", path, options, handler);
   }
+  /**
+   * Registers a `HEAD` route.
+   *
+   * @param path - The absolute route path.
+   * @param options - The route contract and metadata.
+   * @param handler - The validated request handler.
+   * @example
+   * ```ts
+   * const withHead = app.head("/health", { responses: { 204: {} } }, healthHead);
+   * ```
+   * @returns A new router containing the route.
+   * @throws {TypeError} If `path` does not start with `/`.
+   */
   head<Path extends string, Options extends RouteOptions<any, any, Context>>(
     path: Path,
     options: Options,
@@ -453,6 +747,19 @@ export class Router<
   ): Router<Context, Requirements> {
     return this.#route("HEAD", path, options, handler);
   }
+  /**
+   * Registers an `OPTIONS` route.
+   *
+   * @param path - The absolute route path.
+   * @param options - The route contract and metadata.
+   * @param handler - The validated request handler.
+   * @example
+   * ```ts
+   * const withOptions = app.options("/users", { responses: { 204: {} } }, optionsHandler);
+   * ```
+   * @returns A new router containing the route.
+   * @throws {TypeError} If `path` does not start with `/`.
+   */
   options<Path extends string, Options extends RouteOptions<any, any, Context>>(
     path: Path,
     options: Options,
@@ -460,6 +767,19 @@ export class Router<
   ): Router<Context, Requirements> {
     return this.#route("OPTIONS", path, options, handler);
   }
+  /**
+   * Registers a route that matches every HTTP method.
+   *
+   * @param path - The absolute route path.
+   * @param options - The route contract and metadata.
+   * @param handler - The validated request handler.
+   * @example
+   * ```ts
+   * const fallback = app.all("/proxy/*path", { responses: { 200: schema } }, proxy);
+   * ```
+   * @returns A new router containing the route.
+   * @throws {TypeError} If `path` does not start with `/`.
+   */
   all<Path extends string, Options extends RouteOptions<any, any, Context>>(
     path: Path,
     options: Options,
@@ -468,6 +788,16 @@ export class Router<
     return this.#route("ALL", path, options, handler);
   }
 
+  /**
+   * Compiles route definitions into an immutable dispatcher and registry.
+   *
+   * @example
+   * ```ts
+   * const compiled = app.compile();
+   * ```
+   * @returns The cached compiled router.
+   * @throws {Error} If routes, operation IDs, security schemes, or extensions conflict.
+   */
   compile(): CompiledRouter {
     if (this.#compiled) return this.#compiled;
     const options = this.#state.options;
@@ -544,10 +874,33 @@ export class Router<
     return compiled;
   }
 
+  /**
+   * Dispatches a native Fetch request through the compiled router.
+   *
+   * @param request - The incoming request.
+   * @param runtime - An optional runtime value for context creation.
+   * @example
+   * ```ts
+   * const response = await app.fetch(new Request("https://api.example.test/health"));
+   * ```
+   * @returns The route response.
+   */
   fetch(request: Request, runtime?: unknown): Promise<Response> {
     return this.compile().fetch(request, runtime);
   }
 
+  /**
+   * Creates, when needed, and dispatches a Fetch request through the router.
+   *
+   * @param input - An absolute URL or native request.
+   * @param init - Request options when `input` is a URL.
+   * @param runtime - An optional runtime value for context creation.
+   * @example
+   * ```ts
+   * const response = await app.request("https://api.example.test/health");
+   * ```
+   * @returns The route response.
+   */
   request(
     input: string | Request,
     init?: RequestInit,
@@ -556,6 +909,17 @@ export class Router<
     return this.compile().request(input, init, runtime);
   }
 
+  /**
+   * Builds an OpenAPI document from the compiled route registry.
+   *
+   * @param options - An optional adapter and validation setting.
+   * @example
+   * ```ts
+   * const document = await app.openapi({ validate: true });
+   * ```
+   * @returns An OpenAPI 3.1 document by default, or the supplied adapter's document type.
+   * @throws {Error} If route schemas cannot be converted or validation fails.
+   */
   openapi(options?: {
     readonly validate?: boolean;
   }): Promise<OpenAPI31.Document>;
@@ -612,6 +976,16 @@ type RouteHandler<Options extends RouteOptions<any, any, any>, Context> = (
   context: Context,
 ) => MaybePromise<HandlerResult<Options["responses"]>> | RawResponse;
 
+/**
+ * Creates an immutable Fetch-native router.
+ *
+ * @param options - Router dispatch, validation, and OpenAPI options.
+ * @example
+ * ```ts
+ * const app = createRouter().get("/health", { responses: { 200: schema } }, () => ({ status: 200, data: {} }));
+ * ```
+ * @returns A router builder with the configured context type.
+ */
 export function createRouter(): Router<{}, {}>;
 export function createRouter<Requirements extends object>(): Router<
   Requirements,
@@ -1269,3 +1643,4 @@ function defaultTitle(status: number): string {
 function stableJson(value: unknown): string {
   return JSON.stringify(value, Object.keys(value as object).sort());
 }
+/** Supplies default problem members for an error. */

@@ -1,5 +1,29 @@
+/** Stores routes and resolves a request method and pathname to a route. */
 export interface RouteMatcher<Route> {
+  /**
+   * Registers a route.
+   *
+   * @param method - The HTTP method, or `ALL`.
+   * @param path - The route path pattern.
+   * @param route - The route payload to return when matched.
+   * @example
+   * ```ts
+   * matcher.add("GET", "/users/{id}", route);
+   * ```
+   * @returns Nothing.
+   */
   add(method: string, path: string, route: Route): void;
+  /**
+   * Resolves a request to its matching route and path parameters.
+   *
+   * @param method - The request HTTP method.
+   * @param pathname - The request pathname.
+   * @example
+   * ```ts
+   * const match = matcher.match("GET", "/users/42");
+   * ```
+   * @returns The matched route and parameters, or `undefined` when no route matches.
+   */
   match(
     method: string,
     pathname: string,
@@ -22,10 +46,17 @@ type Segment =
 /**
  * The built-in matcher deliberately has no knowledge of route contracts or
  * dispatch. Its ordering is static segment, parameter, then wildcard.
+ *
+ * @example
+ * ```ts
+ * const matcher = new DefaultRouteMatcher<string>();
+ * matcher.add("GET", "/users/{id}", "user");
+ * ```
  */
 export class DefaultRouteMatcher<Route> implements RouteMatcher<Route> {
   #entries: Entry<Route>[] = [];
 
+  /** @inheritDoc */
   add(method: string, path: string, route: Route): void {
     const segments = parsePath(path);
     this.#entries.push({
@@ -40,6 +71,7 @@ export class DefaultRouteMatcher<Route> implements RouteMatcher<Route> {
     this.#entries.sort(compareEntries);
   }
 
+  /** @inheritDoc */
   match(
     method: string,
     pathname: string,
@@ -58,6 +90,17 @@ export class DefaultRouteMatcher<Route> implements RouteMatcher<Route> {
   }
 }
 
+/**
+ * Parses a route path into static, parameter, and wildcard segments.
+ *
+ * @param path - An absolute route path.
+ * @example
+ * ```ts
+ * parsePath("/users/{id}/*rest");
+ * ```
+ * @returns The parsed path segments.
+ * @throws {TypeError} If `path` does not start with `/`.
+ */
 export function parsePath(path: string): readonly Segment[] {
   if (!path.startsWith("/")) {
     throw new TypeError(`Route paths must start with '/': ${path}`);
@@ -71,6 +114,16 @@ export function parsePath(path: string): readonly Segment[] {
   });
 }
 
+/**
+ * Splits a pathname into non-empty segments without leading or trailing slashes.
+ *
+ * @param path - The path to split.
+ * @example
+ * ```ts
+ * splitPath("/users/42/"); // ["users", "42"]
+ * ```
+ * @returns The path segments.
+ */
 export function splitPath(path: string): readonly string[] {
   return path === "/" ? [] : path.replace(/^\/+|\/+$/g, "").split("/");
 }
