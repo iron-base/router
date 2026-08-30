@@ -44,6 +44,46 @@ void invalidStatus;
 void invalidEmpty;
 void missingHeaders;
 
+const Conflict = z.object({ code: z.literal("CONFLICT") });
+class ConflictError extends Error {}
+createRouter().errors({
+  409: {
+    match: (error): error is ConflictError => error instanceof ConflictError,
+    schema: Conflict,
+    handler: (error) => {
+      error.message;
+      return { data: { code: "CONFLICT" as const } };
+    },
+  },
+});
+// @ts-expect-error error handler data must conform to its schema.
+createRouter().errors({
+  422: {
+    schema: Conflict,
+    handler: () => ({ data: { code: "INVALID" } }),
+  },
+});
+
+createRouter().get(
+  "/complex",
+  {
+    responses: { 204: {} },
+    errors: {
+      409: {
+        match: (error): error is ConflictError => error instanceof ConflictError,
+        schema: Conflict,
+        handler: (error) => {
+          error.message;
+          // @ts-expect-error matched errors retain their narrowed type.
+          error.nonexistent;
+          return { data: { code: "CONFLICT" as const } };
+        },
+      },
+    },
+  },
+  () => ({ status: 204 as const }),
+);
+
 const child = createRouter<{ database: { query: () => void } }>()
   .use<{ user: { id: string } }>((_request, context, next) =>
     next({ ...context, user: { id: "u1" } }),

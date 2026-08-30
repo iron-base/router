@@ -202,7 +202,9 @@ function operation(
     };
   }
   for (const [status, error] of route.route.errors) {
-    if (options.errors && !options.errors.includes(status)) continue;
+    if (Array.isArray(options.errors) && !options.errors.includes(status)) {
+      continue;
+    }
     const definition = error.definition;
     if (typeof definition === "function") {
       responses[String(status)] ??= problemResponse();

@@ -58,6 +58,29 @@ it("generates deterministic OpenAPI 3.1 and 3.0 documents", async () => {
 
   const defaultDocument: OpenAPI31.Document = await app.openapi();
   expect(defaultDocument.openapi).toBe("3.1.1");
+
+  const served = await app.request("https://test.invalid/openapi.json");
+  expect(served.status).toBe(200);
+  expect(served.headers.get("content-type")).toBe("application/json");
+  expect(await served.json()).toEqual(defaultDocument);
+});
+
+it("serves OpenAPI documents from a configured path", async () => {
+  const app = createRouter({ openApiUrl: "/docs/openapi.json" }).get(
+    "/health",
+    { responses: { 204: {} } },
+    () => ({ status: 204 as const }),
+  );
+
+  const response = await app.request("https://test.invalid/docs/openapi.json");
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    openapi: "3.1.1",
+    paths: { "/health": {} },
+  });
+  expect(
+    (await app.request("https://test.invalid/openapi.json")).status,
+  ).toBe(404);
 });
 
 it("rejects OpenAPI 3.1-only security schemes for OpenAPI 3.0", async () => {

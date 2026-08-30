@@ -242,7 +242,6 @@ describe("router integration", () => {
     expect(duplicateResponse.status).toBe(500);
     expect(await duplicateResponse.json()).toEqual({
       title: "Internal server error",
-      status: 500,
     });
   });
 
@@ -290,7 +289,7 @@ describe("router integration", () => {
     ).toEqual({ requestId: "r1", child: true });
     expect(
       await (await app.request("https://test.invalid/one/missing")).json(),
-    ).toEqual({ title: "Missing r1", status: 404 });
+    ).toEqual({ title: "Missing r1" });
     expect(
       await (await app.request("https://test.invalid/sibling")).json(),
     ).toEqual({ sibling: true });
@@ -331,14 +330,12 @@ describe("router integration", () => {
       await (await classified.request("https://test.invalid/conflict")).json(),
     ).toEqual({
       code: "CONFLICT",
-      status: 409,
     });
     const invalid = await classified.request("https://test.invalid/invalid");
     expect(invalid.status).toBe(500);
     const unknown = await classified.request("https://test.invalid/unknown");
     expect(await unknown.json()).toEqual({
       title: "Internal server error",
-      status: 500,
     });
   });
 

@@ -6,7 +6,7 @@ type ParentContext = { requestId: string };
 // The generic argument declares capabilities this reusable child expects.
 const users = createRouter<ParentContext>()
   .use<{ user: { id: string } }>((_request, context, next) =>
-    next({ ...context, user: { id: "demo-user" } }),
+    next({ ...context, user: { id: "demo-user" } })
   )
   .get(
     "/me",
@@ -23,12 +23,13 @@ const users = createRouter<ParentContext>()
 
 export const app = createRouter()
   .use<ParentContext>((_request, context, next) =>
-    next({ ...context, requestId: crypto.randomUUID() }),
+    next({ ...context, requestId: crypto.randomUUID() })
   )
-  .mount("/users", users);
+  .mount("/users", users).compile();
 
 if (import.meta.main) {
-  console.log(
-    await (await app.request("https://example.test/users/me")).json(),
-  );
+  Bun.serve({ fetch: app.fetch });
+  // console.log(
+  //   await (await app.request("https://example.test/users/me")).json(),
+  // );
 }

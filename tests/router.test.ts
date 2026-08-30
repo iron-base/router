@@ -116,10 +116,10 @@ describe("router dispatch", () => {
 
     const tea = await app.request("https://example.test/tea");
     expect(tea.status).toBe(418);
-    expect(await tea.json()).toEqual({ title: "Tea unavailable", status: 418 });
+    expect(await tea.json()).toEqual({ title: "Tea unavailable" });
     const missing = await app.request("https://example.test/missing");
     expect(missing.status).toBe(404);
-    expect(await missing.json()).toEqual({ title: "Missing", status: 404 });
+    expect(await missing.json()).toEqual({ title: "Missing" });
   });
 
   it("handles HEAD, OPTIONS, body limits, and explicit raw responses", async () => {

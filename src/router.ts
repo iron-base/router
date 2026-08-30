@@ -49,12 +49,10 @@ export type HttpMethod =
 /** A Standard Schema used to validate a request or response. */
 export type Schema = StandardSchemaV1<any, any>;
 /** Extracts a schema's input type, or `undefined` when no schema is supplied. */
-export type InferInput<S> = S extends Schema
-  ? StandardSchemaV1.InferInput<S>
+export type InferInput<S> = S extends Schema ? StandardSchemaV1.InferInput<S>
   : undefined;
 /** Extracts a schema's output type, or `undefined` when no schema is supplied. */
-export type InferOutput<S> = S extends Schema
-  ? StandardSchemaV1.InferOutput<S>
+export type InferOutput<S> = S extends Schema ? StandardSchemaV1.InferOutput<S>
   : undefined;
 
 type HeaderValues = Record<string, string | readonly string[]>;
@@ -122,24 +120,22 @@ export type ResponseDefinitions = Record<
 
 type ResultHeaders<Definition> = Definition extends {
   readonly headers: infer Headers extends Schema;
-}
-  ? { readonly headers: InferOutput<Headers> }
+} ? { readonly headers: InferOutput<Headers> }
   : { readonly headers?: HeaderValues };
 type ResultForDefinition<
   Status extends number,
   Definition,
 > = Definition extends Schema
   ? { readonly status: Status; readonly data: InferOutput<Definition> } & {
-      readonly headers?: HeaderValues;
-    }
+    readonly headers?: HeaderValues;
+  }
   : Definition extends ResponseDefinition
-    ? Definition extends { readonly body: infer Body extends Schema }
-      ? {
-          readonly status: Status;
-          readonly data: InferOutput<Body>;
-        } & ResultHeaders<Definition>
-      : { readonly status: Status } & ResultHeaders<Definition>
-    : never;
+    ? Definition extends { readonly body: infer Body extends Schema } ? {
+        readonly status: Status;
+        readonly data: InferOutput<Body>;
+      } & ResultHeaders<Definition>
+    : { readonly status: Status } & ResultHeaders<Definition>
+  : never;
 /** The union of declared response values that a route handler may return. */
 export type HandlerResult<Responses extends ResponseDefinitions> = {
   [Status in keyof Responses & number]: ResultForDefinition<
@@ -227,27 +223,49 @@ export interface ProblemDetailsOptions<Context> {
   ) => Partial<ProblemDetails>;
 }
 
+type ErrorResult<
+  Body extends Schema | undefined,
+  Headers extends Schema | undefined,
+> = Body extends Schema
+  ? {
+    readonly data: InferOutput<Body>;
+    readonly headers?: Headers extends Schema ? InferOutput<Headers>
+      : HeaderValues;
+  }
+  : ProblemDetails | {
+    readonly data: unknown;
+    readonly headers?: Headers extends Schema ? InferOutput<Headers>
+      : HeaderValues;
+  };
+
 /** A structured error formatter with optional matching and response contracts. */
-export interface ErrorDefinition<Context = object> {
-  /** Selects this definition for a matching thrown error. */
-  readonly match?: (error: unknown) => boolean;
+export interface ErrorDefinition<
+  Context = object,
+  Body extends Schema | undefined = Schema | undefined,
+  Headers extends Schema | undefined = Schema | undefined,
+  ErrorType = unknown,
+> {
+  /** Selects this definition for a matching thrown error and narrows it for the handler. */
+  readonly match?: (error: unknown) => error is ErrorType;
   /** The schema for a custom JSON error response body. */
-  readonly schema?: Schema;
+  readonly schema?: Body;
   /** The schema for custom error response headers. */
-  readonly headers?: Schema;
+  readonly headers?: Headers;
   /** Formats the thrown error as problem details or custom response data. */
   readonly handler: (
-    error: unknown,
+    error: ErrorType,
     context: Context,
-  ) => MaybePromise<
-    ProblemDetails | { readonly data: unknown; readonly headers?: HeaderValues }
-  >;
+  ) => MaybePromise<ErrorResult<Body, Headers>>;
 }
 /** Maps HTTP error status codes to response formatters. */
+type ProblemFormatter<Context> = (
+  error: unknown,
+  context: Context,
+) => MaybePromise<ProblemDetails>;
 export type ErrorDefinitions<Context> = Record<
   number,
-  | ((error: unknown, context: Context) => MaybePromise<ProblemDetails>)
-  | ErrorDefinition<Context>
+  | ProblemFormatter<Context>
+  | ErrorDefinition<Context, Schema | undefined, Schema | undefined, any>
 >;
 
 /** Configures a route's contract, metadata, middleware, and responses. */
@@ -274,8 +292,8 @@ export interface RouteOptions<
   readonly request?: RequestContractType;
   /** The response statuses and contracts that the handler may return. */
   readonly responses: Responses;
-  /** Error statuses to include in the generated OpenAPI operation. */
-  readonly errors?: readonly number[];
+  /** Endpoint-specific error formatters. Array status filters remain supported for OpenAPI compatibility. */
+  readonly errors?: ErrorDefinitions<Context> | readonly number[];
   /** Middleware that runs after scoped middleware and before the route handler. */
   readonly middleware?: readonly Middleware<Context, any>[];
   /** OpenAPI specification extensions for the operation. */
@@ -326,14 +344,13 @@ export function defineSecurity<
 }): SecurityPolicy<Context, AddedContext> {
   // Metadata is attached to the middleware so Router.use can collect it.
   const policy = (mode: "required" | "optional" | "metadataOnly") => {
-    const middleware =
-      mode === "metadataOnly"
-        ? (
-            _: Request,
-            context: Context,
-            next: (value: Context & AddedContext) => Promise<Response>,
-          ) => next(context as Context & AddedContext)
-        : definition.middleware;
+    const middleware = mode === "metadataOnly"
+      ? (
+        _: Request,
+        context: Context,
+        next: (value: Context & AddedContext) => Promise<Response>,
+      ) => next(context as Context & AddedContext)
+      : definition.middleware;
     Object.assign(middleware, {
       __ironbaseSecurity: {
         name: definition.name,
@@ -405,6 +422,8 @@ export interface RouterOptions<Context extends object = object> {
   readonly responseValidation?: "off" | "development" | "always";
   /** Configures default problem details responses. */
   readonly problemDetails?: ProblemDetailsOptions<Context>;
+  /** The path where the generated OpenAPI document is served. Defaults to `/openapi.json`. */
+  readonly openApiUrl?: string;
   /** Configures OpenAPI document generation. */
   readonly openapi?: {
     /** The default OpenAPI adapter. */
@@ -443,7 +462,7 @@ interface InternalErrorDefinition {
   readonly status: number;
   readonly definition:
     | ((error: unknown, context: any) => MaybePromise<ProblemDetails>)
-    | ErrorDefinition<any>;
+    | ErrorDefinition<any, any, any, any>;
 }
 interface State {
   readonly options: RouterOptions<any>;
@@ -537,15 +556,17 @@ export class Router<
     middleware: Middleware<Context, AddedContext>,
   ): Router<Context & AddedContext, Requirements>;
   use<ChildContext extends object, ChildRequirements extends object>(
-    child: Router<ChildContext, ChildRequirements> &
-      (Context extends ChildRequirements ? unknown : never),
+    child:
+      & Router<ChildContext, ChildRequirements>
+      & (Context extends ChildRequirements ? unknown : never),
   ): Router<Context, Requirements>;
   use(value: Middleware<any, any> | Router<any>): Router<any> {
-    if (value instanceof Router)
+    if (value instanceof Router) {
       return this.mount(
         "/",
         value as Router<any, any> & (Context extends any ? unknown : never),
       );
+    }
     const scopes = [...this.#state.scopes];
     const current = scopes[scopes.length - 1];
     if (!current) throw new Error("Router has no scope");
@@ -572,18 +593,29 @@ export class Router<
    * @returns A new router with the error definitions.
    * @throws {TypeError} If a key is not an HTTP error status from 400 through 599.
    */
+  errors<
+    Body extends Schema | undefined = undefined,
+    Headers extends Schema | undefined = undefined,
+    ErrorType = unknown,
+  >(
+    definitions: Record<
+      number,
+      ErrorDefinition<Context, Body, Headers, ErrorType>
+    >,
+  ): Router<Context, Requirements>;
+  errors<const Definitions extends ErrorDefinitions<Context>>(
+    definitions: Definitions & (
+      Extract<Definitions[keyof Definitions], Function> extends never
+        ? never
+        : unknown
+    ),
+  ): Router<Context, Requirements>;
   errors(
     definitions: ErrorDefinitions<Context>,
   ): Router<Context, Requirements> {
     const errors = new Map(this.#state.errors);
-    for (const [key, definition] of Object.entries(definitions)) {
-      const status = Number(key);
-      if (!Number.isInteger(status) || status < 400 || status > 599) {
-        throw new TypeError(
-          `Error status must be an HTTP error status: ${key}`,
-        );
-      }
-      errors.set(status, { status, definition });
+    for (const [status, definition] of errorDefinitions(definitions)) {
+      errors.set(status, definition);
     }
     return new Router({ ...this.#state, errors });
   }
@@ -602,8 +634,9 @@ export class Router<
    */
   mount<ChildContext extends object, ChildRequirements extends object>(
     prefix: string,
-    child: Router<ChildContext, ChildRequirements> &
-      (Context extends ChildRequirements ? unknown : never),
+    child:
+      & Router<ChildContext, ChildRequirements>
+      & (Context extends ChildRequirements ? unknown : never),
   ): Router<Context, Requirements> {
     const normalizedPrefix = normalizeRoutePath(prefix, this.#state.options);
     const childState = child.#state;
@@ -637,6 +670,25 @@ export class Router<
   get<
     RequestType extends RequestContract | undefined,
     Responses extends ResponseDefinitions,
+    Body extends Schema | undefined = undefined,
+    Headers extends Schema | undefined = undefined,
+    ErrorType = unknown,
+  >(
+    path: string,
+    options: Omit<RouteOptions<RequestType, Responses, Context>, "errors"> & {
+      readonly errors: Record<
+        number,
+        ErrorDefinition<Context, Body, Headers, ErrorType>
+      >;
+    },
+    handler: (
+      request: RequestFor<RequestType>,
+      context: Context,
+    ) => MaybePromise<HandlerResult<Responses>> | RawResponse,
+  ): Router<Context, Requirements>;
+  get<
+    RequestType extends RequestContract | undefined,
+    Responses extends ResponseDefinitions,
   >(
     path: string,
     options: RouteOptions<RequestType, Responses, Context>,
@@ -644,6 +696,11 @@ export class Router<
       request: RequestFor<RequestType>,
       context: Context,
     ) => MaybePromise<HandlerResult<Responses>> | RawResponse,
+  ): Router<Context, Requirements>;
+  get(
+    path: string,
+    options: RouteOptions<any, any, Context>,
+    handler: RouteHandler<any, Context>,
   ): Router<Context, Requirements> {
     return this.#route("GET", path, options, handler);
   }
@@ -801,8 +858,8 @@ export class Router<
   compile(): CompiledRouter {
     if (this.#compiled) return this.#compiled;
     const options = this.#state.options;
-    const matcher =
-      options.matcher?.() ?? new DefaultRouteMatcher<CompiledRoute>();
+    const matcher = options.matcher?.() ??
+      new DefaultRouteMatcher<CompiledRoute>();
     const routes = this.#state.routes.map((route) => ({
       method: route.method,
       path: normalizeRoutePath(route.path, options),
@@ -815,18 +872,20 @@ export class Router<
     for (const route of routes) {
       const key = `${route.method} ${route.path}`;
       const previous = seen.get(key);
-      if (previous)
+      if (previous) {
         throw new Error(
           `Duplicate route ${key}; already registered at ${previous.path}`,
         );
+      }
       seen.set(key, route);
       validateRoute(route);
       if (route.options.operationId) {
         const previousOperation = operationIds.get(route.options.operationId);
-        if (previousOperation)
+        if (previousOperation) {
           throw new Error(
             `Duplicate operationId '${route.options.operationId}' for ${route.method} ${route.path} and ${previousOperation.method} ${previousOperation.path}`,
           );
+        }
         operationIds.set(route.options.operationId, route);
       }
       for (const metadata of route.route.security.values()) {
@@ -858,8 +917,9 @@ export class Router<
           this.#state.errors,
         ),
       request: (input, init, runtime) => {
-        const request =
-          input instanceof Request ? input : new Request(input, init);
+        const request = input instanceof Request
+          ? input
+          : new Request(input, init);
         return dispatch(
           request,
           runtime,
@@ -937,8 +997,9 @@ export class Router<
       const { openapi31 } = await import("./openapi.ts");
       const adapter = openapi31();
       const document = await adapter.build(this.compile().registry);
-      if (options.validate && adapter.validate)
+      if (options.validate && adapter.validate) {
         await adapter.validate(document);
+      }
       return document as Document;
     }
     const adapter = (options.adapter ??
@@ -954,14 +1015,16 @@ export class Router<
     options: RouteOptions<any, any, Context>,
     handler: RouteHandler<any, Context>,
   ): Router<Context, Requirements> {
+    const routeErrors = errorDefinitions(options.errors);
+    const errorScopes = [routeErrors, this.#state.errors];
     const route: InternalRoute = {
       method,
       path: normalizeRoutePath(path, this.#state.options),
       options: snapshotRouteOptions(options),
       handler: handler as InternalRoute["handler"],
       scopes: this.#state.scopes,
-      errors: this.#state.errors,
-      errorScopes: [this.#state.errors],
+      errors: mergeErrorScopes(errorScopes),
+      errorScopes,
       security: this.#state.security,
     };
     return new Router({
@@ -997,6 +1060,7 @@ export function createRouter<Context extends object>(
 export function createRouter<Context extends object = object>(
   options: RouterOptions<Context> = {},
 ): Router<Context, object> {
+  normalizeRoutePath(options.openApiUrl ?? "/openapi.json", options);
   const state: State = {
     options,
     scopes: [{ context: options.context, middleware: [] }],
@@ -1021,6 +1085,21 @@ async function dispatch(
     const url = new URL(request.url);
     const pathname = normalizeIncomingPath(url.pathname, options);
     const method = request.method.toUpperCase();
+    if (pathname === normalizeRoutePath(options.openApiUrl ?? "/openapi.json", options)) {
+      if (method !== "GET" && method !== "HEAD") {
+        return new Response(null, {
+          status: 405,
+          headers: { allow: "GET, HEAD" },
+        });
+      }
+      const response = await openApiResponse(registry, options);
+      if (method === "GET") return response;
+      return new Response(null, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+    }
     let match = matcher.match(method, pathname);
     route = match?.route;
     let headFromGet = false;
@@ -1042,15 +1121,14 @@ async function dispatch(
       }
       throw new RouterError(404, "Not found");
     }
-    const scopes =
-      route.route.options.security?.length === 0
-        ? route.route.scopes.map((scope) => ({
-            ...scope,
-            middleware: scope.middleware.filter(
-              (middleware) => !isSecurityMiddleware(middleware),
-            ),
-          }))
-        : route.route.scopes;
+    const scopes = route.route.options.security?.length === 0
+      ? route.route.scopes.map((scope) => ({
+        ...scope,
+        middleware: scope.middleware.filter(
+          (middleware) => !isSecurityMiddleware(middleware),
+        ),
+      }))
+      : route.route.scopes;
     const response = await runScopes(
       scopes,
       request,
@@ -1100,6 +1178,23 @@ async function dispatch(
   }
 }
 
+async function openApiResponse(
+  registry: CompiledRouteRegistry,
+  options: RouterOptions,
+): Promise<Response> {
+  if (options.openapi?.adapter) {
+    const document = await options.openapi.adapter.build(registry);
+    return new Response(JSON.stringify(document), {
+      headers: { "content-type": "application/json" },
+    });
+  }
+  const { openapi31 } = await import("./openapi.ts");
+  const document = await openapi31().build(registry);
+  return new Response(JSON.stringify(document), {
+    headers: { "content-type": "application/json" },
+  });
+}
+
 async function runScopes(
   scopes: readonly Scope[],
   request: Request,
@@ -1139,8 +1234,9 @@ async function runMiddleware(
   if (!current) return terminal(context);
   let called = false;
   const next = async (nextContext: any): Promise<Response> => {
-    if (called)
+    if (called) {
       throw new RouterError(500, "Middleware called next() more than once");
+    }
     called = true;
     return runMiddleware(middleware, request, nextContext, terminal, index + 1);
   };
@@ -1195,7 +1291,7 @@ async function validate(
       result.issues.map((issue) => ({
         message: issue.message,
         path: issue.path?.map((segment) =>
-          typeof segment === "object" ? segment.key : segment,
+          typeof segment === "object" ? segment.key : segment
         ),
       })),
     );
@@ -1208,11 +1304,13 @@ async function readJsonBody(request: Request, limit: number): Promise<unknown> {
     .get("content-type")
     ?.split(";", 1)[0]
     ?.toLowerCase();
-  if (type !== "application/json" && !type?.endsWith("+json"))
+  if (type !== "application/json" && !type?.endsWith("+json")) {
     throw new RouterError(415, "Unsupported media type");
+  }
   const length = request.headers.get("content-length");
-  if (length && Number(length) > limit)
+  if (length && Number(length) > limit) {
     throw new RouterError(413, "Request body too large");
+  }
   if (!request.body) return undefined;
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -1253,32 +1351,37 @@ async function serializeSuccess(
     throw new RouterError(500, "Route handler must return a declared response");
   }
   const definition = definitions[result.status];
-  if (!definition)
+  if (!definition) {
     throw new RouterError(500, `Undeclared response status ${result.status}`);
+  }
   const normalized = isSchema(definition)
     ? { body: definition, contentType: "application/json" }
     : definition;
-  if (!normalized.body && "data" in result)
+  if (!normalized.body && "data" in result) {
     throw new RouterError(
       500,
       `Status ${result.status} does not declare a response body`,
     );
-  if (normalized.body && shouldValidateResponse(options))
+  }
+  if (normalized.body && shouldValidateResponse(options)) {
     await validateResponse(normalized.body, result.data, "body");
+  }
   const responseHeaders = new Headers();
   appendHeaders(responseHeaders, result.headers);
-  if (normalized.headers && shouldValidateResponse(options))
+  if (normalized.headers && shouldValidateResponse(options)) {
     await validateResponse(
       normalized.headers,
       headerValues(responseHeaders),
       "headers",
     );
+  }
   const contentType = normalized.contentType ?? "application/json";
   let body: string | null = null;
   if (normalized.body) {
     body = JSON.stringify(result.data);
-    if (!responseHeaders.has("content-type"))
+    if (!responseHeaders.has("content-type")) {
       responseHeaders.set("content-type", contentType);
+    }
   }
   return new Response(body, {
     status: result.status,
@@ -1306,12 +1409,11 @@ async function formatError(
   rootErrors: ReadonlyMap<number, InternalErrorDefinition>,
 ): Promise<Response> {
   const errors = route?.errors ?? rootErrors;
-  const initialStatus =
-    error instanceof HttpError ||
-    error instanceof RouterError ||
-    error instanceof ValidationError
-      ? error.status
-      : 500;
+  const initialStatus = error instanceof HttpError ||
+      error instanceof RouterError ||
+      error instanceof ValidationError
+    ? error.status
+    : 500;
   const selection = selectErrorDefinition(errors, error, initialStatus);
   try {
     return await formatErrorResponse(
@@ -1323,7 +1425,7 @@ async function formatError(
     );
   } catch {
     const origin = route?.errorScopes.findIndex((scope) =>
-      [...scope.values()].includes(selection.definition!),
+      [...scope.values()].includes(selection.definition!)
     );
     if (origin !== undefined && origin >= 0) {
       for (const scope of route!.errorScopes.slice(origin + 1)) {
@@ -1374,10 +1476,9 @@ async function formatErrorResponse(
   let data: unknown;
   let contentType = "application/problem+json";
   if (definition) {
-    const formatted =
-      typeof definition.definition === "function"
-        ? await definition.definition(error, context)
-        : await definition.definition.handler(error, context);
+    const formatted = typeof definition.definition === "function"
+      ? await definition.definition(error, context)
+      : await definition.definition.handler(error, context);
     if (isErrorResult(formatted)) {
       data = formatted.data;
       appendHeaders(headers, formatted.headers);
@@ -1406,12 +1507,12 @@ async function formatErrorResponse(
   } else {
     const problemOptions = options.problemDetails;
     const defaults = problemOptions?.defaults?.(error, status, context) ?? {};
-    const message =
-      error instanceof Error && status < 500 ? error.message : undefined;
+    const message = error instanceof Error && status < 500
+      ? error.message
+      : undefined;
     data = {
       ...defaults,
-      type:
-        problemOptions?.type?.(error, status, context) ??
+      type: problemOptions?.type?.(error, status, context) ??
         (problemOptions?.typeBaseUrl
           ? `${problemOptions.typeBaseUrl.replace(/\/$/, "")}/${status}`
           : defaults.type),
@@ -1422,15 +1523,13 @@ async function formatErrorResponse(
         : {}),
     };
   }
-  if (data && typeof data === "object")
-    data = { ...(data as Record<string, unknown>), status };
   headers.set("content-type", contentType);
   return new Response(JSON.stringify(data), { status, headers });
 }
 
 function safeInternalError(): Response {
   return new Response(
-    JSON.stringify({ title: "Internal server error", status: 500 }),
+    JSON.stringify({ title: "Internal server error" }),
     {
       status: 500,
       headers: { "content-type": "application/problem+json" },
@@ -1463,35 +1562,38 @@ function shouldValidateResponse(options: RouterOptions): boolean {
 }
 
 function headerValues(headers: Headers): HeaderValues {
-  const values: Record<string, string | readonly string[]> =
-    Object.create(null);
+  const values: Record<string, string | readonly string[]> = Object.create(
+    null,
+  );
   for (const [key, value] of headers) values[key.toLowerCase()] = value;
   const cookies = (
     headers as Headers & { getSetCookie?: () => string[] }
   ).getSetCookie?.();
-  if (cookies?.length)
+  if (cookies?.length) {
     values["set-cookie"] = cookies.length === 1 ? cookies[0]! : cookies;
+  }
   return values;
 }
 function queryValues(url: URL): HeaderValues {
-  const values: Record<string, string | readonly string[]> =
-    Object.create(null);
+  const values: Record<string, string | readonly string[]> = Object.create(
+    null,
+  );
   for (const [key, value] of url.searchParams) {
     const previous = values[key];
-    values[key] =
-      previous === undefined
-        ? value
-        : Array.isArray(previous)
-          ? [...previous, value]
-          : [previous, value];
+    values[key] = previous === undefined
+      ? value
+      : Array.isArray(previous)
+      ? [...previous, value]
+      : [previous, value];
   }
   return values;
 }
 function decodeParams(params: Record<string, string>): Record<string, string> {
   const decoded: Record<string, string> = Object.create(null);
   try {
-    for (const [key, value] of Object.entries(params))
+    for (const [key, value] of Object.entries(params)) {
       decoded[key] = decodeURIComponent(value);
+    }
     return decoded;
   } catch {
     throw new RouterError(400, "Invalid path encoding");
@@ -1499,9 +1601,11 @@ function decodeParams(params: Record<string, string>): Record<string, string> {
 }
 function appendHeaders(target: Headers, input: unknown): void {
   if (!input || typeof input !== "object") return;
-  for (const [key, rawValue] of Object.entries(
-    input as Record<string, unknown>,
-  )) {
+  for (
+    const [key, rawValue] of Object.entries(
+      input as Record<string, unknown>,
+    )
+  ) {
     const values = Array.isArray(rawValue) ? rawValue : [rawValue];
     for (const value of values) target.append(key, String(value));
   }
@@ -1521,17 +1625,17 @@ function snapshotRouteOptions(
   ) as ResponseDefinitions;
   const security = options.security
     ? (Object.freeze(
-        options.security.map((requirement) =>
-          Object.freeze(
-            Object.fromEntries(
-              Object.entries(requirement).map(([name, scopes]) => [
-                name,
-                Object.freeze([...scopes]),
-              ]),
-            ),
+      options.security.map((requirement) =>
+        Object.freeze(
+          Object.fromEntries(
+            Object.entries(requirement).map(([name, scopes]) => [
+              name,
+              Object.freeze([...scopes]),
+            ]),
           ),
-        ),
-      ) as readonly SecurityRequirement[])
+        )
+      ),
+    ) as readonly SecurityRequirement[])
     : undefined;
   return Object.freeze({
     ...options,
@@ -1539,6 +1643,11 @@ function snapshotRouteOptions(
       ? Object.freeze({ ...options.request })
       : undefined,
     responses,
+    errors: options.errors
+      ? Array.isArray(options.errors)
+        ? Object.freeze([...options.errors])
+        : Object.freeze({ ...options.errors })
+      : undefined,
     middleware: options.middleware
       ? Object.freeze([...options.middleware])
       : undefined,
@@ -1549,24 +1658,47 @@ function snapshotRouteOptions(
       : undefined,
   });
 }
+function errorDefinitions(
+  definitions: ErrorDefinitions<any> | readonly number[] | undefined,
+): ReadonlyMap<number, InternalErrorDefinition> {
+  const errors = new Map<number, InternalErrorDefinition>();
+  if (!definitions || Array.isArray(definitions)) return errors;
+  for (const [key, definition] of Object.entries(definitions)) {
+    const status = Number(key);
+    if (!Number.isInteger(status) || status < 400 || status > 599) {
+      throw new TypeError(
+        `Error status must be an HTTP error status: ${key}`,
+      );
+    }
+    errors.set(status, { status, definition });
+  }
+  return errors;
+}
 function mergeErrorScopes(
   scopes: readonly ReadonlyMap<number, InternalErrorDefinition>[],
 ): ReadonlyMap<number, InternalErrorDefinition> {
   const merged = new Map<number, InternalErrorDefinition>();
-  for (let index = scopes.length - 1; index >= 0; index -= 1)
-    for (const [status, definition] of scopes[index]!)
+  for (let index = scopes.length - 1; index >= 0; index -= 1) {
+    for (const [status, definition] of scopes[index]!) {
       merged.set(status, definition);
+    }
+  }
   return merged;
 }
-function normalizeRoutePath(path: string, options: RouterOptions): string {
-  if (!path.startsWith("/"))
+function normalizeRoutePath(path: string, options: RouterOptions<any>): string {
+  if (!path.startsWith("/")) {
     throw new TypeError(`Route paths must start with '/': ${path}`);
+  }
   return normalizeIncomingPath(path, options);
 }
-function normalizeIncomingPath(path: string, options: RouterOptions): string {
+function normalizeIncomingPath(
+  path: string,
+  options: RouterOptions<any>,
+): string {
   let result = path || "/";
-  if (options.trailingSlash === "ignore" && result.length > 1)
+  if (options.trailingSlash === "ignore" && result.length > 1) {
     result = result.replace(/\/+$/, "");
+  }
   if (options.caseSensitive === false) result = result.toLowerCase();
   return result;
 }
@@ -1580,13 +1712,15 @@ function allowedMethods(
   pathname: string,
 ): string[] {
   const methods = new Set<string>();
-  for (const route of routes)
+  for (const route of routes) {
     if (pathMatches(route.path, pathname)) {
-      if (route.method === "ALL")
+      if (route.method === "ALL") {
         return ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"];
+      }
       methods.add(route.method);
       if (route.method === "GET") methods.add("HEAD");
     }
+  }
   return [...methods].sort();
 }
 function pathMatches(pattern: string, pathname: string): boolean {
@@ -1599,17 +1733,19 @@ function pathMatches(pattern: string, pathname: string): boolean {
     if (
       value === undefined ||
       (segment.kind === "static" && value !== segment.value)
-    )
+    ) {
       return false;
+    }
   }
   return index === parts.length;
 }
 function validateRoute(route: CompiledRoute): void {
   for (const key of Object.keys(route.options.extensions ?? {})) {
-    if (!key.startsWith("x-"))
+    if (!key.startsWith("x-")) {
       throw new Error(
         `Invalid extension '${key}' on ${route.method} ${route.path}`,
       );
+    }
   }
   const placeholders = parsePath(route.path)
     .filter((segment) => segment.kind === "param")

@@ -102,10 +102,42 @@ describe("router composition", () => {
 
     expect(
       await (await app.request("https://test.invalid/child/missing")).json(),
-    ).toEqual({ title: "Child missing", status: 404 });
+    ).toEqual({ title: "Child missing" });
     expect(
       await (await app.request("https://test.invalid/sibling")).json(),
-    ).toEqual({ title: "Parent missing", status: 404 });
+    ).toEqual({ title: "Parent missing" });
+  });
+
+  it("uses endpoint errors before inherited formatters and falls back when unmatched", async () => {
+    class ComplexError extends Error {}
+    const app = createRouter()
+      .errors({ 404: () => ({ title: "Shared missing" }) })
+      .get(
+        "/complex",
+        {
+          request: { query: z.object({ fallback: z.string().optional() }) },
+          responses: { 204: {} },
+          errors: {
+            409: {
+              match: (error): error is ComplexError => error instanceof ComplexError,
+              handler: () => ({ title: "Endpoint conflict" }),
+            },
+          },
+        },
+        (request) => {
+          if (request.query.fallback) throw httpError(404, {});
+          throw new ComplexError();
+        },
+      );
+
+    const conflict = await app.request("https://test.invalid/complex");
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toEqual({ title: "Endpoint conflict" });
+    expect(
+      await (
+        await app.request("https://test.invalid/complex?fallback=yes")
+      ).json(),
+    ).toEqual({ title: "Shared missing" });
   });
 
   it("falls back to the parent error formatter when a child formatter fails", async () => {
@@ -126,7 +158,6 @@ describe("router composition", () => {
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({
       title: "Parent fallback",
-      status: 500,
     });
   });
 
