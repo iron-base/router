@@ -1,0 +1,354 @@
+import type { OpenAPI30 } from "./openapi/3.0.ts";
+import type { OpenAPI31 } from "./openapi/3.1.ts";
+import type {
+  CompiledRoute,
+  OpenAPIAdapter,
+  ResponseDefinition,
+  Schema,
+} from "./router.ts";
+import type { StandardJSONSchemaV1 } from "./standards/json.ts";
+
+export type OpenAPIDocument = OpenAPI30.Document | OpenAPI31.Document;
+export type OpenAPIInfo = OpenAPI30.Info | OpenAPI31.Info;
+export type OpenAPISecurityScheme =
+  | OpenAPI30.SecurityScheme
+  | OpenAPI31.SecurityScheme;
+export type { OpenAPI30 } from "./openapi/3.0.ts";
+export type { OpenAPI31 } from "./openapi/3.1.ts";
+
+export function openapi31(
+  options: { readonly info?: OpenAPI31.Info } = {},
+): OpenAPIAdapter<OpenAPI31.Document> {
+  return createAdapter<OpenAPI31.Document>(
+    "3.1.1",
+    "draft-2020-12",
+    options.info,
+  );
+}
+
+export function openapi30(
+  options: { readonly info?: OpenAPI30.Info } = {},
+): OpenAPIAdapter<OpenAPI30.Document> {
+  return createAdapter<OpenAPI30.Document>(
+    "3.0.3",
+    "openapi-3.0",
+    options.info,
+  );
+}
+
+function createAdapter<Document extends OpenAPIDocument>(
+  version: Document["openapi"],
+  target: StandardJSONSchemaV1.Target,
+  info?: OpenAPIInfo,
+): OpenAPIAdapter<Document> {
+  return {
+    version,
+    schemaTarget: target,
+    build(registry) {
+      if (target === "openapi-3.0") {
+        for (const [name, scheme] of Object.entries(registry.securitySchemes)) {
+          if (scheme.type === "mutualTLS") {
+            throw new Error(
+              `Security scheme '${name}' uses mutualTLS, which OpenAPI 3.0 does not support`,
+            );
+          }
+        }
+      }
+      const paths: Record<string, OpenAPI30.PathItem> = Object.create(null);
+      for (const route of registry.routes) {
+        const existing = paths[route.path];
+        const operations: OpenAPI30.PathItem = existing ?? {};
+        if (!existing) {
+          paths[route.path] = operations;
+        }
+        const method =
+          route.method.toLowerCase() === "all"
+            ? "x-all"
+            : route.method.toLowerCase();
+        (operations as Record<string, OpenAPI30.Operation>)[method] = operation(
+          route,
+          target,
+        );
+      }
+      return {
+        openapi: version,
+        info: info ??
+          registry.info ?? { title: "Ironbase API", version: "0.0.0" },
+        paths,
+        ...(Object.keys(registry.securitySchemes).length
+          ? {
+              components: {
+                securitySchemes: registry.securitySchemes,
+              },
+            }
+          : {}),
+      } as unknown as Document;
+    },
+    validate(document) {
+      if (
+        !document ||
+        typeof document !== "object" ||
+        !document.openapi ||
+        !document.paths
+      ) {
+        throw new TypeError("OpenAPI adapter produced an invalid document");
+      }
+    },
+  };
+}
+
+function operation(
+  route: CompiledRoute,
+  target: StandardJSONSchemaV1.Target,
+): OpenAPI30.Operation {
+  const options = route.options;
+  const parameters: OpenAPI30.Parameter[] = [];
+  const request = options.request;
+  if (request?.params)
+    parameters.push(
+      ...parameterEntries(
+        route.path,
+        "path",
+        request.params,
+        target,
+        route,
+        true,
+      ),
+    );
+  if (request?.query)
+    parameters.push(
+      ...parameterEntries(
+        route.path,
+        "query",
+        request.query,
+        target,
+        route,
+        false,
+      ),
+    );
+  if (request?.headers)
+    parameters.push(
+      ...parameterEntries(
+        route.path,
+        "header",
+        request.headers,
+        target,
+        route,
+        false,
+      ),
+    );
+  const responses: Record<string, OpenAPI30.Response> = Object.create(null);
+  for (const [status, definition] of Object.entries(options.responses) as [
+    string,
+    Schema | ResponseDefinition,
+  ][]) {
+    const normalized = isSchema(definition)
+      ? { body: definition, contentType: "application/json" }
+      : definition;
+    const body = normalized.body
+      ? {
+          content: {
+            [normalized.contentType ?? "application/json"]: {
+              schema: convert(
+                normalized.body,
+                target,
+                route,
+                `response ${status}`,
+                "output",
+              ),
+            },
+          },
+        }
+      : {};
+    responses[status] = {
+      description: normalized.description ?? `HTTP ${status} response`,
+      ...(normalized.headers
+        ? {
+            headers: headerDefinitions(
+              normalized.headers,
+              target,
+              route,
+              `response ${status} headers`,
+              "output",
+            ),
+          }
+        : {}),
+      ...body,
+    };
+  }
+  for (const [status, error] of route.route.errors) {
+    if (options.errors && !options.errors.includes(status)) continue;
+    const definition = error.definition;
+    if (typeof definition === "function") {
+      responses[String(status)] ??= problemResponse();
+    } else {
+      responses[String(status)] ??= {
+        description: `HTTP ${status} error`,
+        ...(definition.headers
+          ? {
+              headers: headerDefinitions(
+                definition.headers,
+                target,
+                route,
+                `error ${status} headers`,
+                "output",
+              ),
+            }
+          : {}),
+        content: {
+          [definition.schema ? "application/json" : "application/problem+json"]:
+            {
+              schema: definition.schema
+                ? convert(
+                    definition.schema,
+                    target,
+                    route,
+                    `error ${status}`,
+                    "output",
+                  )
+                : problemSchema(),
+            },
+        },
+      };
+    }
+  }
+  const security = options.security ?? securityRequirements(route);
+  return {
+    ...(options.operationId ? { operationId: options.operationId } : {}),
+    ...(options.summary ? { summary: options.summary } : {}),
+    ...(options.description ? { description: options.description } : {}),
+    ...(options.tags ? { tags: options.tags } : {}),
+    ...(options.deprecated ? { deprecated: true } : {}),
+    ...(parameters.length ? { parameters } : {}),
+    ...(request?.body
+      ? {
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: convert(request.body, target, route, "request body"),
+              },
+            },
+          },
+        }
+      : {}),
+    ...(security ? { security } : {}),
+    responses: responses as OpenAPI30.Responses,
+    ...options.extensions,
+  };
+}
+
+function parameterEntries(
+  path: string,
+  location: "path" | "query" | "header",
+  schema: Schema,
+  target: StandardJSONSchemaV1.Target,
+  route: CompiledRoute,
+  required: boolean,
+): OpenAPI30.Parameter[] {
+  const jsonSchema = convert(schema, target, route, `${location} parameters`);
+  const properties = jsonSchema.properties;
+  if (!properties || typeof properties !== "object") {
+    if (location === "path")
+      throw new Error(
+        `Schema for ${route.method} ${route.path} path parameters must produce an object schema`,
+      );
+    return [
+      { name: location, in: location, required: false, schema: jsonSchema },
+    ];
+  }
+  const requiredKeys = Array.isArray(jsonSchema.required)
+    ? new Set(jsonSchema.required)
+    : new Set<string>();
+  const names =
+    location === "path"
+      ? [...path.matchAll(/\{([^}]+)\}/g)].map((match) => match[1]!)
+      : Object.keys(properties as object).sort();
+  return names.map((name) => ({
+    name,
+    in: location,
+    required: required || requiredKeys.has(name),
+    schema: (properties as Record<string, OpenAPI30.Schema>)[name],
+  }));
+}
+
+function headerDefinitions(
+  schema: Schema,
+  target: StandardJSONSchemaV1.Target,
+  route: CompiledRoute,
+  location: string,
+  representation: "input" | "output" = "input",
+): Readonly<Record<string, OpenAPI30.Header>> {
+  const converted = convert(schema, target, route, location, representation);
+  const properties = converted.properties;
+  if (!properties || typeof properties !== "object")
+    return { headers: { schema: converted } };
+  const required = new Set(
+    Array.isArray(converted.required) ? converted.required : [],
+  );
+  return Object.fromEntries(
+    Object.entries(properties as Record<string, OpenAPI30.Schema>).map(
+      ([name, value]) => [
+        name,
+        { required: required.has(name), schema: value },
+      ],
+    ),
+  );
+}
+
+function convert(
+  schema: Schema,
+  target: StandardJSONSchemaV1.Target,
+  route: CompiledRoute,
+  location: string,
+  representation: "input" | "output" = "input",
+): OpenAPI30.SchemaObject {
+  const standard = schema as Schema & StandardJSONSchemaV1;
+  const converter = standard["~standard"].jsonSchema;
+  if (!converter) {
+    throw new Error(
+      `Schema vendor '${schema["~standard"].vendor}' for ${route.method} ${route.path} ${location} does not support Standard JSON Schema`,
+    );
+  }
+  try {
+    return converter[representation]({ target }) as OpenAPI30.SchemaObject;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Unable to convert schema from '${schema["~standard"].vendor}' for ${route.method} ${route.path} ${location}: ${message}`,
+    );
+  }
+}
+
+function securityRequirements(
+  route: CompiledRoute,
+): readonly OpenAPI30.SecurityRequirement[] | undefined {
+  const required = [...route.route.security.values()].filter(
+    (policy) => policy.mode === "required",
+  );
+  return required.length
+    ? required.map((policy) => ({ [policy.name]: [] }))
+    : undefined;
+}
+function isSchema(value: unknown): value is Schema {
+  return Boolean(value && typeof value === "object" && "~standard" in value);
+}
+function problemSchema(): OpenAPI30.SchemaObject {
+  return {
+    type: "object",
+    properties: {
+      type: { type: "string" },
+      title: { type: "string" },
+      status: { type: "integer" },
+      detail: { type: "string" },
+      instance: { type: "string" },
+    },
+    additionalProperties: true,
+  };
+}
+function problemResponse(): OpenAPI30.Response {
+  return {
+    description: "Problem Details error",
+    content: { "application/problem+json": { schema: problemSchema() } },
+  };
+}
