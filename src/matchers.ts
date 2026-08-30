@@ -76,13 +76,14 @@ export class DefaultRouteMatcher<Route> implements RouteMatcher<Route> {
     method: string,
     pathname: string,
   ): { route: Route; params: Record<string, string> } | undefined {
+    const requestedMethod = method.toUpperCase();
     const parts = splitPath(pathname);
     for (const entry of this.#entries) {
-      if (entry.method !== "ALL" && entry.method !== method.toUpperCase()) {
+      if (entry.method !== "ALL" && entry.method !== requestedMethod) {
         continue;
       }
-      const params: Record<string, string> = Object.create(null);
-      if (matches(entry.segments, parts, params)) {
+      const params = matches(entry.segments, parts);
+      if (params) {
         return { route: entry.route, params };
       }
     }
@@ -143,21 +144,39 @@ function compareEntries<Route>(
 function matches(
   pattern: readonly Segment[],
   path: readonly string[],
-  params: Record<string, string>,
-): boolean {
+): Record<string, string> | undefined {
+  let params: Record<string, string> | undefined;
   let pathIndex = 0;
   for (let index = 0; index < pattern.length; index += 1) {
     const segment = pattern[index];
-    if (!segment) return false;
+    if (!segment) return undefined;
     if (segment.kind === "wildcard") {
       const value = path.slice(pathIndex).join("/");
-      if (segment.name !== "*") params[segment.name] = value;
-      return true;
+      if (segment.name !== "*") {
+        if (params) {
+          params[segment.name] = value;
+        } else {
+          const values: Record<string, string> = Object.create(null);
+          values[segment.name] = value;
+          params = values;
+        }
+      }
+      return params ?? Object.create(null);
     }
     const value = path[pathIndex++];
-    if (value === undefined) return false;
-    if (segment.kind === "static" && segment.value !== value) return false;
-    if (segment.kind === "param") params[segment.name] = value;
+    if (value === undefined) return undefined;
+    if (segment.kind === "static" && segment.value !== value) return undefined;
+    if (segment.kind === "param") {
+      if (params) {
+        params[segment.name] = value;
+      } else {
+        const values: Record<string, string> = Object.create(null);
+        values[segment.name] = value;
+        params = values;
+      }
+    }
   }
-  return pathIndex === path.length;
+  return pathIndex === path.length
+    ? (params ?? Object.create(null))
+    : undefined;
 }

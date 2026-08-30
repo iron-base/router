@@ -1021,13 +1021,15 @@ async function dispatch(
     const url = new URL(request.url);
     const pathname = normalizeIncomingPath(url.pathname, options);
     const method = request.method.toUpperCase();
-    route = matcher.match(method, pathname)?.route;
+    let match = matcher.match(method, pathname);
+    route = match?.route;
     let headFromGet = false;
     if (!route && method === "HEAD") {
-      route = matcher.match("GET", pathname)?.route;
+      match = matcher.match("GET", pathname);
+      route = match?.route;
       headFromGet = Boolean(route);
     }
-    if (!route) {
+    if (!route || !match) {
       const allowed = allowedMethods(registry.routes, pathname);
       if (allowed.length) {
         if (method === "OPTIONS" && options.autoOptions !== false) {
@@ -1040,8 +1042,6 @@ async function dispatch(
       }
       throw new RouterError(404, "Not found");
     }
-    const match = matcher.match(headFromGet ? "GET" : method, pathname);
-    if (!match) throw new RouterError(404, "Not found");
     const scopes =
       route.route.options.security?.length === 0
         ? route.route.scopes.map((scope) => ({
@@ -1155,17 +1155,14 @@ async function executeRoute(
   options: RouterOptions,
 ): Promise<Response> {
   const contract = route.options.request;
-  const params = decodeParams(rawParams);
   const validatedParams = contract?.params
-    ? await validate(contract.params, params, "params")
+    ? await validate(contract.params, decodeParams(rawParams), "params")
     : undefined;
-  const query = queryValues(new URL(request.url));
   const validatedQuery = contract?.query
-    ? await validate(contract.query, query, "query")
+    ? await validate(contract.query, queryValues(new URL(request.url)), "query")
     : undefined;
-  const headers = headerValues(request.headers);
   const validatedHeaders = contract?.headers
-    ? await validate(contract.headers, headers, "headers")
+    ? await validate(contract.headers, headerValues(request.headers), "headers")
     : undefined;
   let validatedBody: unknown;
   if (contract?.body) {

@@ -33,6 +33,16 @@ describe("default route matcher", () => {
     expect(matcher.match("GET", "/users")).toBeUndefined();
   });
 
+  it("matches the final static route with an empty null-prototype params object", () => {
+    const matcher = new DefaultRouteMatcher<number>();
+    for (let index = 0; index < 250; index += 1)
+      matcher.add("GET", `/resources/${index}`, index);
+
+    const match = matcher.match("GET", "/resources/249");
+    expect(match).toEqual({ route: 249, params: {} });
+    expect(Object.getPrototypeOf(match?.params)).toBeNull();
+  });
+
   it("keeps static and parameter precedence stable across registration order", () => {
     // Derived from Hono's static-versus-dynamic router conformance cases.
     for (const paths of [

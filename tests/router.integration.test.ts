@@ -1,6 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import { z } from "zod";
-import { createRouter, defineSecurity, httpError } from "../src/index.ts";
+import {
+  createRouter,
+  DefaultRouteMatcher,
+  defineSecurity,
+  httpError,
+} from "../src/index.ts";
 import type { StandardSchemaV1 } from "../src/standards/schema.ts";
 import { request as injectRequest } from "../src/testing.ts";
 
@@ -122,6 +127,25 @@ describe("router integration", () => {
       (await app.request("https://test.invalid/all", { method: "PATCH" }))
         .status,
     ).toBe(204);
+  });
+
+  it("uses the successful matcher result without a second lookup", async () => {
+    const delegate = new DefaultRouteMatcher<any>();
+    let calls = 0;
+    const app = createRouter({
+      matcher: () => ({
+        add: (method, path, route) => delegate.add(method, path, route),
+        match: (method, pathname) => {
+          calls += 1;
+          return delegate.match(method, pathname);
+        },
+      }),
+    }).get("/health", { responses: { 204: {} } }, () => ({
+      status: 204 as const,
+    }));
+
+    expect((await app.request("https://test.invalid/health")).status).toBe(204);
+    expect(calls).toBe(1);
   });
 
   it("validates query, lowercase headers, JSON bodies, async schemas, and invalid encodings", async () => {
