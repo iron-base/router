@@ -1,28 +1,99 @@
 {
   "name": "@ironbase/router",
-  "module": "index.ts",
-  "exports": {
-    ".": "./index.ts",
-    "./openapi": "./src/openapi.ts",
-    "./testing": "./src/testing.ts",
-    "./matchers": "./src/matchers.ts"
-  },
+  "version": "1.0.0",
+  "description": "A Fetch-native TypeScript router with Standard Schema validation and typed OpenAPI output.",
   "type": "module",
-  "private": true,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./openapi": {
+      "types": "./dist/openapi.d.ts",
+      "import": "./dist/openapi.js",
+      "default": "./dist/openapi.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js",
+      "default": "./dist/testing.js"
+    },
+    "./matchers": {
+      "types": "./dist/matchers.d.ts",
+      "import": "./dist/matchers.js",
+      "default": "./dist/matchers.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "sideEffects": false,
+  "scripts": {
+    "bench": "bun bench/*.ts",
+    "build": "bun run clean && tsc -p tsconfig.build.json",
+    "check": "bun run format:check && bun run lint && bun run typecheck && bun run test:types && bun run test",
+    "clean": "bun -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "lint": "biome lint .",
+    "package:dry-run": "bun run check && bun pm pack --dry-run",
+    "publish:dry-run": "bun publish --dry-run --access public",
+    "test": "bun test",
+    "test:coverage": "bun test --coverage",
+    "test:types": "tsc -p tests/types/tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "prepack": "bun run build",
+    "prepublishOnly": "bun run check",
+    "preversion": "bun run package:dry-run"
+  },
+  "keywords": [
+    "router",
+    "http",
+    "fetch",
+    "typescript",
+    "openapi",
+    "standard-schema"
+  ],
+  "author": {
+    "name": "Karl Robeck Alferez",
+    "email": "karlalferezfx@gmail.com"
+  },
+  "contributors": [
+    {
+      "name": "Ironbase Organization",
+      "url": "https://github.com/iron-base"
+    }
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/iron-base/router#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iron-base/router.git"
+  },
+  "bugs": {
+    "url": "https://github.com/iron-base/router/issues"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "bun@1.4.0",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.11",
+    "@biomejs/biome": "2.5.11",
     "@types/bun": "latest",
     "fast-check": "^4.9.0",
     "mitata": "^1.0.34",
+    "typescript": "7.0.2",
     "zod": "^4.5.4"
-  },
-  "scripts": {
-    "bench": "bun bench/*.ts",
-    "check": "bunx tsc --noEmit",
-    "test": "bun test",
-    "test:coverage": "bun test --coverage"
-  },
-  "peerDependencies": {
-    "typescript": "^7"
   }
 }
