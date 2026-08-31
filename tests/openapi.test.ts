@@ -78,9 +78,9 @@ it("serves OpenAPI documents from a configured path", async () => {
     openapi: "3.1.1",
     paths: { "/health": {} },
   });
-  expect(
-    (await app.request("https://test.invalid/openapi.json")).status,
-  ).toBe(404);
+  expect((await app.request("https://test.invalid/openapi.json")).status).toBe(
+    404,
+  );
 });
 
 it("rejects OpenAPI 3.1-only security schemes for OpenAPI 3.0", async () => {

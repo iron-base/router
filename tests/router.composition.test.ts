@@ -119,7 +119,8 @@ describe("router composition", () => {
           responses: { 204: {} },
           errors: {
             409: {
-              match: (error): error is ComplexError => error instanceof ComplexError,
+              match: (error): error is ComplexError =>
+                error instanceof ComplexError,
               handler: () => ({ title: "Endpoint conflict" }),
             },
           },

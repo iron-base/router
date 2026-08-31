@@ -4,13 +4,15 @@ import {
   defineSecurity,
   type HandlerResult,
   type OpenAPIAdapter,
-} from "../src/index.ts";
+} from "@ironbase/router";
 import {
   type OpenAPI30,
   type OpenAPI31,
   openapi30,
   openapi31,
-} from "../src/openapi.ts";
+} from "@ironbase/router/openapi";
+import { DefaultRouteMatcher } from "@ironbase/router/matchers";
+import { request } from "@ironbase/router/testing";
 
 const User = z.object({ id: z.number(), name: z.string() });
 const ResponseHeaders = z.object({ "x-request-id": z.string() });
@@ -70,7 +72,8 @@ createRouter().get(
     responses: { 204: {} },
     errors: {
       409: {
-        match: (error): error is ConflictError => error instanceof ConflictError,
+        match: (error): error is ConflictError =>
+          error instanceof ConflictError,
         schema: Conflict,
         handler: (error) => {
           error.message;
@@ -149,5 +152,9 @@ void invalidExtension;
 
 const adapter30: OpenAPIAdapter<OpenAPI30.Document> = openapi30();
 const adapter31: OpenAPIAdapter<OpenAPI31.Document> = openapi31();
+const matcher = new DefaultRouteMatcher<string>();
+const app = createRouter();
 void adapter30;
 void adapter31;
+void matcher;
+void request(app, "https://api.example.test/health");

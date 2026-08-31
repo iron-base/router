@@ -30,7 +30,8 @@ export const app = createRouter()
       if (!user) throw httpError(404, { userId: request.params.id });
       return { status: 200 as const, data: user };
     },
-  ).compile();
+  )
+  .compile();
 
 if (import.meta.main) {
   Bun.serve({ fetch: app.fetch });

@@ -1,4 +1,4 @@
-import type { CompiledRouter, Router } from "./router.ts";
+import type { CompiledRouter, Router } from "./router.js";
 
 /**
  * Dispatches through the same compiled Fetch boundary used in production.

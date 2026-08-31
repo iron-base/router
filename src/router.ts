@@ -1,13 +1,13 @@
-import { HttpError, RouterError, ValidationError } from "./errors.ts";
+import { HttpError, RouterError, ValidationError } from "./errors.js";
 import {
   DefaultRouteMatcher,
   parsePath,
   type RouteMatcher,
   splitPath,
-} from "./matchers.ts";
-import type { OpenAPI30 } from "./openapi/3.0.ts";
-import type { OpenAPI31 } from "./openapi/3.1.ts";
-import type { StandardSchemaV1 } from "./standards/schema.ts";
+} from "./matchers.js";
+import type { OpenAPI30 } from "./openapi/3.0.js";
+import type { OpenAPI31 } from "./openapi/3.1.js";
+import type { StandardSchemaV1 } from "./standards/schema.js";
 
 /** Metadata used to describe an OpenAPI document. */
 export interface OpenAPIInfo {
@@ -49,10 +49,12 @@ export type HttpMethod =
 /** A Standard Schema used to validate a request or response. */
 export type Schema = StandardSchemaV1<any, any>;
 /** Extracts a schema's input type, or `undefined` when no schema is supplied. */
-export type InferInput<S> = S extends Schema ? StandardSchemaV1.InferInput<S>
+export type InferInput<S> = S extends Schema
+  ? StandardSchemaV1.InferInput<S>
   : undefined;
 /** Extracts a schema's output type, or `undefined` when no schema is supplied. */
-export type InferOutput<S> = S extends Schema ? StandardSchemaV1.InferOutput<S>
+export type InferOutput<S> = S extends Schema
+  ? StandardSchemaV1.InferOutput<S>
   : undefined;
 
 type HeaderValues = Record<string, string | readonly string[]>;
@@ -120,22 +122,24 @@ export type ResponseDefinitions = Record<
 
 type ResultHeaders<Definition> = Definition extends {
   readonly headers: infer Headers extends Schema;
-} ? { readonly headers: InferOutput<Headers> }
+}
+  ? { readonly headers: InferOutput<Headers> }
   : { readonly headers?: HeaderValues };
 type ResultForDefinition<
   Status extends number,
   Definition,
 > = Definition extends Schema
   ? { readonly status: Status; readonly data: InferOutput<Definition> } & {
-    readonly headers?: HeaderValues;
-  }
+      readonly headers?: HeaderValues;
+    }
   : Definition extends ResponseDefinition
-    ? Definition extends { readonly body: infer Body extends Schema } ? {
-        readonly status: Status;
-        readonly data: InferOutput<Body>;
-      } & ResultHeaders<Definition>
-    : { readonly status: Status } & ResultHeaders<Definition>
-  : never;
+    ? Definition extends { readonly body: infer Body extends Schema }
+      ? {
+          readonly status: Status;
+          readonly data: InferOutput<Body>;
+        } & ResultHeaders<Definition>
+      : { readonly status: Status } & ResultHeaders<Definition>
+    : never;
 /** The union of declared response values that a route handler may return. */
 export type HandlerResult<Responses extends ResponseDefinitions> = {
   [Status in keyof Responses & number]: ResultForDefinition<
@@ -228,15 +232,19 @@ type ErrorResult<
   Headers extends Schema | undefined,
 > = Body extends Schema
   ? {
-    readonly data: InferOutput<Body>;
-    readonly headers?: Headers extends Schema ? InferOutput<Headers>
-      : HeaderValues;
-  }
-  : ProblemDetails | {
-    readonly data: unknown;
-    readonly headers?: Headers extends Schema ? InferOutput<Headers>
-      : HeaderValues;
-  };
+      readonly data: InferOutput<Body>;
+      readonly headers?: Headers extends Schema
+        ? InferOutput<Headers>
+        : HeaderValues;
+    }
+  :
+      | ProblemDetails
+      | {
+          readonly data: unknown;
+          readonly headers?: Headers extends Schema
+            ? InferOutput<Headers>
+            : HeaderValues;
+        };
 
 /** A structured error formatter with optional matching and response contracts. */
 export interface ErrorDefinition<
@@ -344,13 +352,14 @@ export function defineSecurity<
 }): SecurityPolicy<Context, AddedContext> {
   // Metadata is attached to the middleware so Router.use can collect it.
   const policy = (mode: "required" | "optional" | "metadataOnly") => {
-    const middleware = mode === "metadataOnly"
-      ? (
-        _: Request,
-        context: Context,
-        next: (value: Context & AddedContext) => Promise<Response>,
-      ) => next(context as Context & AddedContext)
-      : definition.middleware;
+    const middleware =
+      mode === "metadataOnly"
+        ? (
+            _: Request,
+            context: Context,
+            next: (value: Context & AddedContext) => Promise<Response>,
+          ) => next(context as Context & AddedContext)
+        : definition.middleware;
     Object.assign(middleware, {
       __ironbaseSecurity: {
         name: definition.name,
@@ -556,9 +565,8 @@ export class Router<
     middleware: Middleware<Context, AddedContext>,
   ): Router<Context & AddedContext, Requirements>;
   use<ChildContext extends object, ChildRequirements extends object>(
-    child:
-      & Router<ChildContext, ChildRequirements>
-      & (Context extends ChildRequirements ? unknown : never),
+    child: Router<ChildContext, ChildRequirements> &
+      (Context extends ChildRequirements ? unknown : never),
   ): Router<Context, Requirements>;
   use(value: Middleware<any, any> | Router<any>): Router<any> {
     if (value instanceof Router) {
@@ -604,11 +612,10 @@ export class Router<
     >,
   ): Router<Context, Requirements>;
   errors<const Definitions extends ErrorDefinitions<Context>>(
-    definitions: Definitions & (
-      Extract<Definitions[keyof Definitions], Function> extends never
+    definitions: Definitions &
+      (Extract<Definitions[keyof Definitions], Function> extends never
         ? never
-        : unknown
-    ),
+        : unknown),
   ): Router<Context, Requirements>;
   errors(
     definitions: ErrorDefinitions<Context>,
@@ -634,9 +641,8 @@ export class Router<
    */
   mount<ChildContext extends object, ChildRequirements extends object>(
     prefix: string,
-    child:
-      & Router<ChildContext, ChildRequirements>
-      & (Context extends ChildRequirements ? unknown : never),
+    child: Router<ChildContext, ChildRequirements> &
+      (Context extends ChildRequirements ? unknown : never),
   ): Router<Context, Requirements> {
     const normalizedPrefix = normalizeRoutePath(prefix, this.#state.options);
     const childState = child.#state;
@@ -858,8 +864,8 @@ export class Router<
   compile(): CompiledRouter {
     if (this.#compiled) return this.#compiled;
     const options = this.#state.options;
-    const matcher = options.matcher?.() ??
-      new DefaultRouteMatcher<CompiledRoute>();
+    const matcher =
+      options.matcher?.() ?? new DefaultRouteMatcher<CompiledRoute>();
     const routes = this.#state.routes.map((route) => ({
       method: route.method,
       path: normalizeRoutePath(route.path, options),
@@ -917,9 +923,8 @@ export class Router<
           this.#state.errors,
         ),
       request: (input, init, runtime) => {
-        const request = input instanceof Request
-          ? input
-          : new Request(input, init);
+        const request =
+          input instanceof Request ? input : new Request(input, init);
         return dispatch(
           request,
           runtime,
@@ -1085,7 +1090,10 @@ async function dispatch(
     const url = new URL(request.url);
     const pathname = normalizeIncomingPath(url.pathname, options);
     const method = request.method.toUpperCase();
-    if (pathname === normalizeRoutePath(options.openApiUrl ?? "/openapi.json", options)) {
+    if (
+      pathname ===
+      normalizeRoutePath(options.openApiUrl ?? "/openapi.json", options)
+    ) {
       if (method !== "GET" && method !== "HEAD") {
         return new Response(null, {
           status: 405,
@@ -1121,14 +1129,15 @@ async function dispatch(
       }
       throw new RouterError(404, "Not found");
     }
-    const scopes = route.route.options.security?.length === 0
-      ? route.route.scopes.map((scope) => ({
-        ...scope,
-        middleware: scope.middleware.filter(
-          (middleware) => !isSecurityMiddleware(middleware),
-        ),
-      }))
-      : route.route.scopes;
+    const scopes =
+      route.route.options.security?.length === 0
+        ? route.route.scopes.map((scope) => ({
+            ...scope,
+            middleware: scope.middleware.filter(
+              (middleware) => !isSecurityMiddleware(middleware),
+            ),
+          }))
+        : route.route.scopes;
     const response = await runScopes(
       scopes,
       request,
@@ -1291,7 +1300,7 @@ async function validate(
       result.issues.map((issue) => ({
         message: issue.message,
         path: issue.path?.map((segment) =>
-          typeof segment === "object" ? segment.key : segment
+          typeof segment === "object" ? segment.key : segment,
         ),
       })),
     );
@@ -1409,11 +1418,12 @@ async function formatError(
   rootErrors: ReadonlyMap<number, InternalErrorDefinition>,
 ): Promise<Response> {
   const errors = route?.errors ?? rootErrors;
-  const initialStatus = error instanceof HttpError ||
-      error instanceof RouterError ||
-      error instanceof ValidationError
-    ? error.status
-    : 500;
+  const initialStatus =
+    error instanceof HttpError ||
+    error instanceof RouterError ||
+    error instanceof ValidationError
+      ? error.status
+      : 500;
   const selection = selectErrorDefinition(errors, error, initialStatus);
   try {
     return await formatErrorResponse(
@@ -1425,7 +1435,7 @@ async function formatError(
     );
   } catch {
     const origin = route?.errorScopes.findIndex((scope) =>
-      [...scope.values()].includes(selection.definition!)
+      [...scope.values()].includes(selection.definition!),
     );
     if (origin !== undefined && origin >= 0) {
       for (const scope of route!.errorScopes.slice(origin + 1)) {
@@ -1476,9 +1486,10 @@ async function formatErrorResponse(
   let data: unknown;
   let contentType = "application/problem+json";
   if (definition) {
-    const formatted = typeof definition.definition === "function"
-      ? await definition.definition(error, context)
-      : await definition.definition.handler(error, context);
+    const formatted =
+      typeof definition.definition === "function"
+        ? await definition.definition(error, context)
+        : await definition.definition.handler(error, context);
     if (isErrorResult(formatted)) {
       data = formatted.data;
       appendHeaders(headers, formatted.headers);
@@ -1507,12 +1518,12 @@ async function formatErrorResponse(
   } else {
     const problemOptions = options.problemDetails;
     const defaults = problemOptions?.defaults?.(error, status, context) ?? {};
-    const message = error instanceof Error && status < 500
-      ? error.message
-      : undefined;
+    const message =
+      error instanceof Error && status < 500 ? error.message : undefined;
     data = {
       ...defaults,
-      type: problemOptions?.type?.(error, status, context) ??
+      type:
+        problemOptions?.type?.(error, status, context) ??
         (problemOptions?.typeBaseUrl
           ? `${problemOptions.typeBaseUrl.replace(/\/$/, "")}/${status}`
           : defaults.type),
@@ -1528,13 +1539,10 @@ async function formatErrorResponse(
 }
 
 function safeInternalError(): Response {
-  return new Response(
-    JSON.stringify({ title: "Internal server error" }),
-    {
-      status: 500,
-      headers: { "content-type": "application/problem+json" },
-    },
-  );
+  return new Response(JSON.stringify({ title: "Internal server error" }), {
+    status: 500,
+    headers: { "content-type": "application/problem+json" },
+  });
 }
 
 function isErrorResult(
@@ -1562,9 +1570,8 @@ function shouldValidateResponse(options: RouterOptions): boolean {
 }
 
 function headerValues(headers: Headers): HeaderValues {
-  const values: Record<string, string | readonly string[]> = Object.create(
-    null,
-  );
+  const values: Record<string, string | readonly string[]> =
+    Object.create(null);
   for (const [key, value] of headers) values[key.toLowerCase()] = value;
   const cookies = (
     headers as Headers & { getSetCookie?: () => string[] }
@@ -1575,16 +1582,16 @@ function headerValues(headers: Headers): HeaderValues {
   return values;
 }
 function queryValues(url: URL): HeaderValues {
-  const values: Record<string, string | readonly string[]> = Object.create(
-    null,
-  );
+  const values: Record<string, string | readonly string[]> =
+    Object.create(null);
   for (const [key, value] of url.searchParams) {
     const previous = values[key];
-    values[key] = previous === undefined
-      ? value
-      : Array.isArray(previous)
-      ? [...previous, value]
-      : [previous, value];
+    values[key] =
+      previous === undefined
+        ? value
+        : Array.isArray(previous)
+          ? [...previous, value]
+          : [previous, value];
   }
   return values;
 }
@@ -1601,11 +1608,9 @@ function decodeParams(params: Record<string, string>): Record<string, string> {
 }
 function appendHeaders(target: Headers, input: unknown): void {
   if (!input || typeof input !== "object") return;
-  for (
-    const [key, rawValue] of Object.entries(
-      input as Record<string, unknown>,
-    )
-  ) {
+  for (const [key, rawValue] of Object.entries(
+    input as Record<string, unknown>,
+  )) {
     const values = Array.isArray(rawValue) ? rawValue : [rawValue];
     for (const value of values) target.append(key, String(value));
   }
@@ -1625,17 +1630,17 @@ function snapshotRouteOptions(
   ) as ResponseDefinitions;
   const security = options.security
     ? (Object.freeze(
-      options.security.map((requirement) =>
-        Object.freeze(
-          Object.fromEntries(
-            Object.entries(requirement).map(([name, scopes]) => [
-              name,
-              Object.freeze([...scopes]),
-            ]),
+        options.security.map((requirement) =>
+          Object.freeze(
+            Object.fromEntries(
+              Object.entries(requirement).map(([name, scopes]) => [
+                name,
+                Object.freeze([...scopes]),
+              ]),
+            ),
           ),
-        )
-      ),
-    ) as readonly SecurityRequirement[])
+        ),
+      ) as readonly SecurityRequirement[])
     : undefined;
   return Object.freeze({
     ...options,
@@ -1666,9 +1671,7 @@ function errorDefinitions(
   for (const [key, definition] of Object.entries(definitions)) {
     const status = Number(key);
     if (!Number.isInteger(status) || status < 400 || status > 599) {
-      throw new TypeError(
-        `Error status must be an HTTP error status: ${key}`,
-      );
+      throw new TypeError(`Error status must be an HTTP error status: ${key}`);
     }
     errors.set(status, { status, definition });
   }

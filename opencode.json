@@ -1,9 +1,16 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "permission": {
-    "external_directory": "deny"
+    "external_directory": {
+      "~": "deny",
+      "~/.local": "allow"
+    }
   },
   "references": {
+    "ironbase-cli": {
+      "branch": "main",
+      "repository": "https://github.com/iron-base/cli.git"
+    },
     "hono": {
       "branch": "main",
       "repository": "https://github.com/honojs/hono.git"

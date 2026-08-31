@@ -14,6 +14,12 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
+    "paths": {
+      "@ironbase/router": ["./src/index.ts"],
+      "@ironbase/router/openapi": ["./src/openapi.ts"],
+      "@ironbase/router/testing": ["./src/testing.ts"],
+      "@ironbase/router/matchers": ["./src/matchers.ts"]
+    },
 
     // Best practices
     "strict": true,
@@ -26,5 +32,6 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
-  }
+  },
+  "exclude": ["tests/types"]
 }

@@ -29,10 +29,10 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Validate npm publication dry-run
-        run: bun run publish:dry-run
+      - name: Validate package dry-run
+        run: bun run package:dry-run
 
-  typecheck:
+  type-compatibility:
     name: TypeScript ${{ matrix.typescript }}
     runs-on: ubuntu-latest
     strategy:
@@ -55,6 +55,9 @@ jobs:
 
       - name: Check project types
         run: bunx --package typescript@${{ matrix.typescript }} tsc --noEmit
+
+      - name: Check public API types
+        run: bunx --package typescript@${{ matrix.typescript }} tsc -p tests/types/tsconfig.json
 
   cross-platform:
     name: Tests on ${{ matrix.os }}

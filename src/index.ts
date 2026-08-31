@@ -3,9 +3,9 @@ export {
   httpError,
   RouterError,
   ValidationError,
-} from "./errors.ts";
-export type { RouteMatcher } from "./matchers.ts";
-export { DefaultRouteMatcher } from "./matchers.ts";
+} from "./errors.js";
+export type { RouteMatcher } from "./matchers.js";
+export { DefaultRouteMatcher } from "./matchers.js";
 export type {
   CompiledRouteRegistry,
   CompiledRouter,
@@ -30,10 +30,10 @@ export type {
   RouterOptions,
   SecurityPolicy,
   SecurityRequirement,
-} from "./router.ts";
-export { createRouter, defineSecurity, Router, raw } from "./router.ts";
+} from "./router.js";
+export { createRouter, defineSecurity, Router, raw } from "./router.js";
 export type {
   StandardJSONSchemaV1,
   StandardTypedV1,
-} from "./standards/json.ts";
-export type { StandardSchemaV1 } from "./standards/schema.ts";
+} from "./standards/json.js";
+export type { StandardSchemaV1 } from "./standards/schema.js";

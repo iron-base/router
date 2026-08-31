@@ -1,0 +1,20 @@
+name: Pre-release
+
+on:
+  push:
+    tags:
+      - "v*.*.*-*"
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    name: Dispatch trusted publishing
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish prerelease through release workflow
+        run: gh workflow run release.yml --ref "$GITHUB_REF_NAME" -f tag="$GITHUB_REF_NAME"
+        env:
+          GH_TOKEN: ${{ github.token }}
