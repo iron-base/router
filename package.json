@@ -1,6 +1,6 @@
 {
   "name": "@ironbase/router",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "A Fetch-native TypeScript router with Standard Schema validation and typed OpenAPI output.",
   "type": "module",
   "main": "./dist/index.js",
